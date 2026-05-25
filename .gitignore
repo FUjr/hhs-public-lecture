@@ -1,0 +1,7 @@
+__pycache__/
+session_logs/
+_book_extract/
+_pdf_word_extract/
+_sample_pdf/
+_sample_pdf2/
+_sample_render/
