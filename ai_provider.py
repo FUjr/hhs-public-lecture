@@ -413,10 +413,18 @@ class RemoteLessonAI(AIProvider):
     def is_remote_configured(self) -> bool:
         return bool(self.endpoint and self.api_key)
 
+    def is_using_remote(self) -> bool:
+        return self.is_remote_configured() and self.remote_available
+
+    def use_local_mode(self) -> None:
+        self.remote_available = False
+        self.last_call_used_remote = False
+        self.last_error = "manual_local_mode"
+
     def get_runtime_status(self) -> str:
         if not self.is_remote_configured():
             return "课堂模式：本地"
-        if self.remote_available:
+        if self.is_using_remote():
             return "AI后端已连接"
         return "课堂模式：本地"
 

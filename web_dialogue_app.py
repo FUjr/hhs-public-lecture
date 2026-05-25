@@ -141,8 +141,16 @@ class DialogueEngine:
             "lessonTitle": "《爱莲说》，说AI莲",
             "subtitle": "课堂对话 AI",
             "runtimeStatus": self.ai.get_runtime_status(),
+            "usingRemote": self.ai.is_using_remote(),
             "studentQuestionPrompt": "围绕“三种花的区别”或“作者写这三种花的意图”提出一个有价值的问题。",
             "aiStudentPrompt": AI_STUDENT_PROMPT,
+        }
+
+    def use_local_mode(self) -> dict[str, Any]:
+        self.ai.use_local_mode()
+        return {
+            "runtimeStatus": self.ai.get_runtime_status(),
+            "usingRemote": self.ai.is_using_remote(),
         }
 
     def answer_student_question(self, question: str) -> dict[str, str]:
@@ -153,6 +161,7 @@ class DialogueEngine:
                 "source": "empty",
                 "matchedTitle": "",
                 "runtimeStatus": self.ai.get_runtime_status(),
+                "usingRemote": self.ai.is_using_remote(),
             }
 
         preset = self._match_preset(cleaned)
@@ -163,6 +172,7 @@ class DialogueEngine:
                 "source": "preset",
                 "matchedTitle": preset.title,
                 "runtimeStatus": self.ai.get_runtime_status(),
+                "usingRemote": self.ai.is_using_remote(),
             }
 
         lesson_context = (
@@ -175,6 +185,7 @@ class DialogueEngine:
             "source": "generated",
             "matchedTitle": "",
             "runtimeStatus": self.ai.get_runtime_status(),
+            "usingRemote": self.ai.is_using_remote(),
         }
 
     def respond_to_reflection(self, student_text: str) -> dict[str, str]:
@@ -185,6 +196,7 @@ class DialogueEngine:
             "feedback": feedback,
             "followUp": self._build_follow_up(cleaned),
             "runtimeStatus": self.ai.get_runtime_status(),
+            "usingRemote": self.ai.is_using_remote(),
         }
 
     def respond_to_follow_up(self, follow_up: str, student_text: str) -> dict[str, str]:
@@ -193,12 +205,14 @@ class DialogueEngine:
             return {
                 "response": "可以先让学生用一句话回应这个追问，再补充一个具体理由。",
                 "runtimeStatus": self.ai.get_runtime_status(),
+                "usingRemote": self.ai.is_using_remote(),
             }
 
         response = self._build_follow_up_response(follow_up, cleaned)
         return {
             "response": response,
             "runtimeStatus": self.ai.get_runtime_status(),
+            "usingRemote": self.ai.is_using_remote(),
         }
 
     def save_record(self, payload: dict[str, Any]) -> Path:
@@ -419,6 +433,10 @@ class DialogueRequestHandler(BaseHTTPRequestHandler):
             self._send_json(result, status)
             return
 
+        if parsed.path == "/api/runtime/local":
+            self._send_json(self.server.engine.use_local_mode())
+            return
+
         if parsed.path == "/api/ask":
             question = str(payload.get("question", ""))
             self._send_json(self.server.engine.answer_student_question(question))
@@ -604,6 +622,19 @@ HTML_PAGE = r"""<!doctype html>
       font-size: 14px;
       font-weight: 700;
       white-space: nowrap;
+      cursor: pointer;
+      transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+    }
+
+    .status-pill:hover {
+      border-color: var(--green);
+      background: var(--green-2);
+    }
+
+    .status-pill.loading {
+      color: var(--blue);
+      border-color: rgba(50, 94, 143, 0.38);
+      background: rgba(50, 94, 143, 0.08);
     }
 
     .tabs {
@@ -1275,6 +1306,8 @@ HTML_PAGE = r"""<!doctype html>
       studentQuestions: [],
       reflections: [],
       bootstrap: null,
+      usingRemote: false,
+      runtimeStatus: "课堂模式：本地",
     };
 
     const $ = (selector) => document.querySelector(selector);
@@ -1292,8 +1325,39 @@ HTML_PAGE = r"""<!doctype html>
       return response.json();
     }
 
-    function setStatus(text) {
-      $("#runtimeStatus").textContent = text || "课堂模式：本地";
+    function setStatus(text, usingRemote) {
+      if (typeof usingRemote === "boolean") {
+        state.usingRemote = usingRemote;
+      }
+      const node = $("#runtimeStatus");
+      state.runtimeStatus = text || "课堂模式：本地";
+      node.textContent = state.runtimeStatus;
+      node.classList.remove("loading");
+      node.title = state.usingRemote ? "点击切换到课堂模式：本地" : "当前使用课堂模式：本地";
+    }
+
+    function setAiLoading() {
+      if (!state.usingRemote) {
+        return false;
+      }
+      const node = $("#runtimeStatus");
+      node.textContent = "AI思考中...";
+      node.classList.add("loading");
+      return true;
+    }
+
+    async function switchToLocalMode() {
+      if (!state.usingRemote) {
+        toast("已在课堂模式：本地");
+        return;
+      }
+      try {
+        const result = await api("/api/runtime/local", {});
+        setStatus(result.runtimeStatus, result.usingRemote);
+        toast("已切换到课堂模式：本地");
+      } catch (error) {
+        toast("切换失败，请检查服务是否仍在运行");
+      }
     }
 
     function toast(text) {
@@ -1344,6 +1408,7 @@ HTML_PAGE = r"""<!doctype html>
       }
 
       $("#askButton").disabled = true;
+      const restoreStatus = setAiLoading();
       try {
         const result = await api("/api/ask", { question: cleaned });
         state.studentQuestions.push({
@@ -1353,9 +1418,12 @@ HTML_PAGE = r"""<!doctype html>
           matchedTitle: result.matchedTitle || "",
         });
         input.value = "";
-        setStatus(result.runtimeStatus);
+        setStatus(result.runtimeStatus, result.usingRemote);
         renderChat();
       } catch (error) {
+        if (restoreStatus) {
+          setStatus(state.runtimeStatus, state.usingRemote);
+        }
         toast("生成回答失败，请检查服务是否仍在运行");
       } finally {
         $("#askButton").disabled = false;
@@ -1403,11 +1471,15 @@ HTML_PAGE = r"""<!doctype html>
       const input = $("#reflectionInput");
       const studentResponse = input.value.trim();
       $("#reflectButton").disabled = true;
+      const restoreStatus = setAiLoading();
       try {
         const result = await api("/api/reflect", { response: studentResponse });
-        setStatus(result.runtimeStatus);
+        setStatus(result.runtimeStatus, result.usingRemote);
         renderReflection(result, studentResponse);
       } catch (error) {
+        if (restoreStatus) {
+          setStatus(state.runtimeStatus, state.usingRemote);
+        }
         toast("生成点评失败，请检查服务是否仍在运行");
       } finally {
         $("#reflectButton").disabled = false;
@@ -1432,6 +1504,7 @@ HTML_PAGE = r"""<!doctype html>
       }
 
       $("#followUpButton").disabled = true;
+      const restoreStatus = setAiLoading();
       try {
         const result = await api("/api/follow-up", {
           followUp: item.followUp,
@@ -1439,7 +1512,7 @@ HTML_PAGE = r"""<!doctype html>
         });
         item.followUpAnswer = studentResponse;
         item.followUpFeedback = result.response;
-        setStatus(result.runtimeStatus);
+        setStatus(result.runtimeStatus, result.usingRemote);
 
         const answerBox = document.createElement("div");
         answerBox.className = "follow-response-box";
@@ -1449,6 +1522,9 @@ HTML_PAGE = r"""<!doctype html>
         input.disabled = true;
         $("#followUpButton").disabled = true;
       } catch (error) {
+        if (restoreStatus) {
+          setStatus(state.runtimeStatus, state.usingRemote);
+        }
         toast("回应追问失败，请检查服务是否仍在运行");
         $("#followUpButton").disabled = false;
       }
@@ -1493,6 +1569,7 @@ HTML_PAGE = r"""<!doctype html>
       });
       $("#reflectButton").addEventListener("click", respondToReflection);
       $("#saveButton").addEventListener("click", saveRecord);
+      $("#runtimeStatus").addEventListener("click", switchToLocalMode);
 
       const data = await api("/api/bootstrap");
       state.bootstrap = data;
@@ -1500,7 +1577,7 @@ HTML_PAGE = r"""<!doctype html>
       $("#subtitle").textContent = data.subtitle;
       $("#questionPrompt").textContent = data.studentQuestionPrompt;
       $("#aiStudentPrompt").textContent = data.aiStudentPrompt;
-      setStatus(data.runtimeStatus);
+      setStatus(data.runtimeStatus, data.usingRemote);
       $("#questionInput").focus();
     }
 
