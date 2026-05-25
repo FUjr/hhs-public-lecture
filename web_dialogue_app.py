@@ -650,6 +650,11 @@ HTML_PAGE = r"""<!doctype html>
       background: rgba(50, 94, 143, 0.08);
     }
 
+    .status-pill[aria-disabled="true"] {
+      opacity: 0.68;
+      pointer-events: none;
+    }
+
     .tabs {
       display: inline-grid;
       grid-template-columns: 1fr 1fr;
@@ -925,6 +930,62 @@ HTML_PAGE = r"""<!doctype html>
       background: var(--green-2);
     }
 
+    .danger-button {
+      min-height: 42px;
+      border: 1px solid var(--coral);
+      border-radius: 8px;
+      padding: 0 16px;
+      background: var(--coral);
+      color: #fff;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .danger-button:hover {
+      background: #a94d36;
+    }
+
+    .ai-work-panel {
+      position: fixed;
+      left: 50%;
+      bottom: 22px;
+      z-index: 20;
+      display: none;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 14px;
+      align-items: center;
+      width: min(720px, calc(100vw - 44px));
+      padding: 16px;
+      border: 2px solid rgba(50, 94, 143, 0.45);
+      border-radius: 8px;
+      background: #ffffff;
+      color: var(--ink);
+      box-shadow: 0 22px 58px rgba(20, 44, 38, 0.22);
+      transform: translateX(-50%);
+    }
+
+    .ai-work-panel.show {
+      display: grid;
+    }
+
+    .ai-work-text {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .ai-work-text strong {
+      color: var(--blue);
+      font-size: 20px;
+      line-height: 1.15;
+    }
+
+    .ai-work-text span {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
     .prompt-block {
       padding: 22px;
     }
@@ -1124,6 +1185,10 @@ HTML_PAGE = r"""<!doctype html>
         grid-template-columns: 1fr;
       }
 
+      .ai-work-panel {
+        grid-template-columns: 1fr;
+      }
+
       .thinking-steps {
         grid-template-columns: 1fr;
       }
@@ -1312,6 +1377,14 @@ HTML_PAGE = r"""<!doctype html>
       </div>
     </section>
   </main>
+  <div id="aiWorkPanel" class="ai-work-panel" aria-live="polite">
+    <div class="ai-work-text">
+      <strong id="aiWorkTitle">AI思考中...</strong>
+      <span id="aiWorkDetail">正在生成课堂回应</span>
+    </div>
+    <button id="retryButton" class="ghost-button" type="button">重试</button>
+    <button id="stopButton" class="danger-button" type="button">停止</button>
+  </div>
   <div id="toast" class="toast"></div>
 
   <script>
@@ -1321,16 +1394,21 @@ HTML_PAGE = r"""<!doctype html>
       bootstrap: null,
       usingRemote: false,
       runtimeStatus: "课堂模式：本地",
+      currentRequest: null,
+      lastRetry: null,
     };
 
     const $ = (selector) => document.querySelector(selector);
 
-    async function api(path, payload) {
+    async function api(path, payload, signal) {
       const options = payload === undefined ? {} : {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       };
+      if (signal) {
+        options.signal = signal;
+      }
       const response = await fetch(path, options);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -1359,6 +1437,92 @@ HTML_PAGE = r"""<!doctype html>
       return true;
     }
 
+    function setBusyControls(disabled) {
+      ["#askButton", "#reflectButton", "#saveButton"].forEach((selector) => {
+        const node = $(selector);
+        if (node) {
+          node.disabled = disabled;
+        }
+      });
+      $("#runtimeStatus").setAttribute("aria-disabled", disabled ? "true" : "false");
+      const followButton = $("#followUpButton");
+      if (followButton && !followButton.dataset.finished) {
+        followButton.disabled = disabled;
+      }
+    }
+
+    function showAiWorkPanel(detail) {
+      $("#aiWorkTitle").textContent = "AI思考中...";
+      $("#aiWorkDetail").textContent = detail;
+      $("#aiWorkPanel").classList.add("show");
+      $("#retryButton").disabled = true;
+      $("#stopButton").disabled = false;
+    }
+
+    function hideAiWorkPanel(keepRetry = false) {
+      if (keepRetry && state.lastRetry) {
+        $("#aiWorkPanel").classList.add("show");
+        $("#aiWorkTitle").textContent = "操作未完成";
+        $("#aiWorkDetail").textContent = "可以重试刚才的操作";
+        $("#retryButton").disabled = false;
+        $("#stopButton").disabled = true;
+        return;
+      }
+      $("#aiWorkPanel").classList.remove("show");
+      $("#stopButton").disabled = true;
+      $("#retryButton").disabled = !state.lastRetry;
+    }
+
+    function stopCurrentRequest() {
+      if (!state.currentRequest) {
+        return;
+      }
+      state.currentRequest.abort();
+      state.currentRequest = null;
+      setBusyControls(false);
+      hideAiWorkPanel(true);
+      setStatus(state.runtimeStatus, state.usingRemote);
+      toast("已停止等待，可重试或切换本地模式");
+    }
+
+    function retryLastRequest() {
+      if (!state.lastRetry || state.currentRequest) {
+        return;
+      }
+      state.lastRetry();
+    }
+
+    async function runAiTask(detail, retry, request) {
+      const controller = new AbortController();
+      let keepRetryPanel = false;
+      state.currentRequest = controller;
+      state.lastRetry = retry;
+      setBusyControls(true);
+      const restoreStatus = setAiLoading();
+      showAiWorkPanel(state.usingRemote ? detail : "正在整理课堂回应");
+
+      try {
+        return await request(controller.signal);
+      } catch (error) {
+        if (error.name === "AbortError") {
+          keepRetryPanel = true;
+          return null;
+        }
+        keepRetryPanel = true;
+        hideAiWorkPanel(true);
+        throw error;
+      } finally {
+        if (state.currentRequest === controller) {
+          state.currentRequest = null;
+        }
+        setBusyControls(false);
+        hideAiWorkPanel(keepRetryPanel);
+        if (restoreStatus) {
+          setStatus(state.runtimeStatus, state.usingRemote);
+        }
+      }
+    }
+
     function setConnectingStatus() {
       const node = $("#runtimeStatus");
       node.textContent = "连接AI后端...";
@@ -1366,6 +1530,9 @@ HTML_PAGE = r"""<!doctype html>
     }
 
     async function toggleRuntimeMode() {
+      if (state.currentRequest) {
+        return;
+      }
       try {
         setConnectingStatus();
         const result = state.usingRemote
@@ -1425,6 +1592,10 @@ HTML_PAGE = r"""<!doctype html>
     }
 
     async function askQuestion(question) {
+      if (state.currentRequest) {
+        toast("AI正在思考，请稍候或点击停止");
+        return;
+      }
       const input = $("#questionInput");
       const cleaned = (question || input.value).trim();
       if (!cleaned) {
@@ -1432,10 +1603,15 @@ HTML_PAGE = r"""<!doctype html>
         return;
       }
 
-      $("#askButton").disabled = true;
-      const restoreStatus = setAiLoading();
       try {
-        const result = await api("/api/ask", { question: cleaned });
+        const result = await runAiTask(
+          "正在生成课堂回答",
+          () => askQuestion(cleaned),
+          (signal) => api("/api/ask", { question: cleaned }, signal),
+        );
+        if (!result) {
+          return;
+        }
         state.studentQuestions.push({
           question: cleaned,
           answer: result.answer,
@@ -1446,12 +1622,8 @@ HTML_PAGE = r"""<!doctype html>
         setStatus(result.runtimeStatus, result.usingRemote);
         renderChat();
       } catch (error) {
-        if (restoreStatus) {
-          setStatus(state.runtimeStatus, state.usingRemote);
-        }
         toast("生成回答失败，请检查服务是否仍在运行");
       } finally {
-        $("#askButton").disabled = false;
         input.focus();
       }
     }
@@ -1493,25 +1665,33 @@ HTML_PAGE = r"""<!doctype html>
     }
 
     async function respondToReflection() {
+      if (state.currentRequest) {
+        toast("AI正在思考，请稍候或点击停止");
+        return;
+      }
       const input = $("#reflectionInput");
       const studentResponse = input.value.trim();
-      $("#reflectButton").disabled = true;
-      const restoreStatus = setAiLoading();
       try {
-        const result = await api("/api/reflect", { response: studentResponse });
+        const result = await runAiTask(
+          "正在生成点评与追问",
+          respondToReflection,
+          (signal) => api("/api/reflect", { response: studentResponse }, signal),
+        );
+        if (!result) {
+          return;
+        }
         setStatus(result.runtimeStatus, result.usingRemote);
         renderReflection(result, studentResponse);
       } catch (error) {
-        if (restoreStatus) {
-          setStatus(state.runtimeStatus, state.usingRemote);
-        }
         toast("生成点评失败，请检查服务是否仍在运行");
-      } finally {
-        $("#reflectButton").disabled = false;
       }
     }
 
     async function respondToFollowUp(reflectionIndex) {
+      if (state.currentRequest) {
+        toast("AI正在思考，请稍候或点击停止");
+        return;
+      }
       const input = $("#followUpInput");
       if (!input) {
         return;
@@ -1528,13 +1708,18 @@ HTML_PAGE = r"""<!doctype html>
         return;
       }
 
-      $("#followUpButton").disabled = true;
-      const restoreStatus = setAiLoading();
       try {
-        const result = await api("/api/follow-up", {
-          followUp: item.followUp,
-          response: studentResponse,
-        });
+        const result = await runAiTask(
+          "正在生成追问回应",
+          () => respondToFollowUp(reflectionIndex),
+          (signal) => api("/api/follow-up", {
+            followUp: item.followUp,
+            response: studentResponse,
+          }, signal),
+        );
+        if (!result) {
+          return;
+        }
         item.followUpAnswer = studentResponse;
         item.followUpFeedback = result.response;
         setStatus(result.runtimeStatus, result.usingRemote);
@@ -1546,10 +1731,8 @@ HTML_PAGE = r"""<!doctype html>
 
         input.disabled = true;
         $("#followUpButton").disabled = true;
+        $("#followUpButton").dataset.finished = "true";
       } catch (error) {
-        if (restoreStatus) {
-          setStatus(state.runtimeStatus, state.usingRemote);
-        }
         toast("回应追问失败，请检查服务是否仍在运行");
         $("#followUpButton").disabled = false;
       }
@@ -1595,6 +1778,8 @@ HTML_PAGE = r"""<!doctype html>
       $("#reflectButton").addEventListener("click", respondToReflection);
       $("#saveButton").addEventListener("click", saveRecord);
       $("#runtimeStatus").addEventListener("click", toggleRuntimeMode);
+      $("#stopButton").addEventListener("click", stopCurrentRequest);
+      $("#retryButton").addEventListener("click", retryLastRequest);
 
       const data = await api("/api/bootstrap");
       state.bootstrap = data;
