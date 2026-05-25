@@ -32,7 +32,7 @@ class ClassroomAssistantApp:
         self.question_var = tk.StringVar()
         self.stage_var = tk.StringVar()
         self.ai_mode_var = tk.StringVar()
-        self.status_var = tk.StringVar(value="演示模式已就绪，可直接开始课堂。")
+        self.status_var = tk.StringVar(value="课堂模式已就绪，可直接开始。")
 
         self._configure_root()
         self._build_styles()

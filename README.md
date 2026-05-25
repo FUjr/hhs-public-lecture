@@ -118,6 +118,11 @@ export DEPLOY_UPDATE_COMMAND="docker compose -f /path/to/docker-compose.yml pull
 
 接口不可用、超时或未配置时，程序会自动回退到内置演示逻辑。
 
+程序启动时会先尝试请求一次已配置的 AI 后端：
+
+- 请求成功时，界面状态显示 `AI后端已连接`。
+- 请求失败或未配置时，界面状态显示 `课堂模式：本地`，课堂互动仍会使用内置备用回答继续运行。
+
 如果使用 OpenAI 兼容平台：
 
 - `LESSON_AI_ENDPOINT` 可以直接填平台给你的 `base URL`

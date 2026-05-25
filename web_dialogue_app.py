@@ -1293,7 +1293,7 @@ HTML_PAGE = r"""<!doctype html>
     }
 
     function setStatus(text) {
-      $("#runtimeStatus").textContent = text || "当前使用演示模式";
+      $("#runtimeStatus").textContent = text || "课堂模式：本地";
     }
 
     function toast(text) {

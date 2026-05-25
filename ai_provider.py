@@ -140,6 +140,8 @@ class RemoteLessonAI(AIProvider):
         self.endpoint, self.api_mode = self._normalize_endpoint(raw_endpoint)
         self.last_call_used_remote = False
         self.last_error: str | None = None
+        self.remote_available = False
+        self._check_remote_backend()
 
     def answer_student_question(self, question: str, lesson_context: str) -> str:
         question_type = self._classify_student_question(question)
@@ -198,6 +200,60 @@ class RemoteLessonAI(AIProvider):
             self.last_error = "missing_config"
             return fallback_text
 
+        if not self.remote_available:
+            self.last_call_used_remote = False
+            return fallback_text
+
+        try:
+            text = self._request_remote(prompt)
+        except urllib.error.HTTPError as exc:
+            self.last_call_used_remote = False
+            self.last_error = f"http_{exc.code}"
+            self.remote_available = False
+            return fallback_text
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+            self.last_call_used_remote = False
+            self.last_error = "request_failed"
+            self.remote_available = False
+            return fallback_text
+
+        if text and text.strip():
+            self.last_call_used_remote = True
+            self.last_error = None
+            return text.strip()
+
+        self.last_call_used_remote = False
+        self.last_error = "empty_response"
+        self.remote_available = False
+        return fallback_text
+
+    def _check_remote_backend(self) -> None:
+        if not self.endpoint or not self.api_key:
+            self.remote_available = False
+            self.last_error = "missing_config"
+            return
+
+        try:
+            text = self._request_remote("请只回复：已连接")
+        except urllib.error.HTTPError as exc:
+            self.remote_available = False
+            self.last_error = f"http_{exc.code}"
+            return
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+            self.remote_available = False
+            self.last_error = "request_failed"
+            return
+
+        if text.strip():
+            self.remote_available = True
+            self.last_call_used_remote = True
+            self.last_error = None
+            return
+
+        self.remote_available = False
+        self.last_error = "empty_response"
+
+    def _request_remote(self, prompt: str) -> str:
         payload = self._build_payload(prompt)
         data = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
@@ -210,28 +266,10 @@ class RemoteLessonAI(AIProvider):
             method="POST",
         )
 
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                body = response.read().decode("utf-8")
-                parsed = json.loads(body)
-        except urllib.error.HTTPError as exc:
-            self.last_call_used_remote = False
-            self.last_error = f"http_{exc.code}"
-            return fallback_text
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-            self.last_call_used_remote = False
-            self.last_error = "request_failed"
-            return fallback_text
-
-        text = self._extract_text(parsed)
-        if text and text.strip():
-            self.last_call_used_remote = True
-            self.last_error = None
-            return text.strip()
-
-        self.last_call_used_remote = False
-        self.last_error = "empty_response"
-        return fallback_text
+        with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+            body = response.read().decode("utf-8")
+            parsed = json.loads(body)
+        return self._extract_text(parsed).strip()
 
     def _build_payload(self, prompt: str) -> dict:
         if self.api_mode == "chat_completions":
@@ -377,10 +415,10 @@ class RemoteLessonAI(AIProvider):
 
     def get_runtime_status(self) -> str:
         if not self.is_remote_configured():
-            return "当前使用演示模式"
-        if self.last_call_used_remote:
-            return "当前使用真实 AI"
-        return "已配置真实 AI，等待首次连接"
+            return "课堂模式：本地"
+        if self.remote_available:
+            return "AI后端已连接"
+        return "课堂模式：本地"
 
     @staticmethod
     def _normalize_endpoint(endpoint: str | None) -> tuple[str | None, str]:
