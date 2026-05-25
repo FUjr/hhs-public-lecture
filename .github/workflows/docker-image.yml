@@ -3,6 +3,7 @@ name: Build and deploy container
 on:
   push:
     branches:
+      - master
       - main
   workflow_dispatch:
 
