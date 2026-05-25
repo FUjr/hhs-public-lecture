@@ -153,6 +153,15 @@ class DialogueEngine:
             "usingRemote": self.ai.is_using_remote(),
         }
 
+    def try_remote_mode(self) -> dict[str, Any]:
+        connected = self.ai.try_remote_mode()
+        return {
+            "runtimeStatus": self.ai.get_runtime_status(),
+            "usingRemote": self.ai.is_using_remote(),
+            "connected": connected,
+            "configured": self.ai.is_remote_configured(),
+        }
+
     def answer_student_question(self, question: str) -> dict[str, str]:
         cleaned = question.strip()
         if not cleaned:
@@ -435,6 +444,10 @@ class DialogueRequestHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/runtime/local":
             self._send_json(self.server.engine.use_local_mode())
+            return
+
+        if parsed.path == "/api/runtime/remote":
+            self._send_json(self.server.engine.try_remote_mode())
             return
 
         if parsed.path == "/api/ask":
@@ -1333,7 +1346,7 @@ HTML_PAGE = r"""<!doctype html>
       state.runtimeStatus = text || "课堂模式：本地";
       node.textContent = state.runtimeStatus;
       node.classList.remove("loading");
-      node.title = state.usingRemote ? "点击切换到课堂模式：本地" : "当前使用课堂模式：本地";
+      node.title = state.usingRemote ? "点击切换到课堂模式：本地" : "点击尝试连接AI后端";
     }
 
     function setAiLoading() {
@@ -1346,16 +1359,28 @@ HTML_PAGE = r"""<!doctype html>
       return true;
     }
 
-    async function switchToLocalMode() {
-      if (!state.usingRemote) {
-        toast("已在课堂模式：本地");
-        return;
-      }
+    function setConnectingStatus() {
+      const node = $("#runtimeStatus");
+      node.textContent = "连接AI后端...";
+      node.classList.add("loading");
+    }
+
+    async function toggleRuntimeMode() {
       try {
-        const result = await api("/api/runtime/local", {});
+        setConnectingStatus();
+        const result = state.usingRemote
+          ? await api("/api/runtime/local", {})
+          : await api("/api/runtime/remote", {});
         setStatus(result.runtimeStatus, result.usingRemote);
-        toast("已切换到课堂模式：本地");
+        if (result.usingRemote) {
+          toast("AI后端已连接");
+        } else if (result.configured === false) {
+          toast("未配置AI后端，已保持本地模式");
+        } else {
+          toast("已切换到课堂模式：本地");
+        }
       } catch (error) {
+        setStatus(state.runtimeStatus, state.usingRemote);
         toast("切换失败，请检查服务是否仍在运行");
       }
     }
@@ -1569,7 +1594,7 @@ HTML_PAGE = r"""<!doctype html>
       });
       $("#reflectButton").addEventListener("click", respondToReflection);
       $("#saveButton").addEventListener("click", saveRecord);
-      $("#runtimeStatus").addEventListener("click", switchToLocalMode);
+      $("#runtimeStatus").addEventListener("click", toggleRuntimeMode);
 
       const data = await api("/api/bootstrap");
       state.bootstrap = data;

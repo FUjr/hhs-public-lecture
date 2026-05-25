@@ -421,6 +421,10 @@ class RemoteLessonAI(AIProvider):
         self.last_call_used_remote = False
         self.last_error = "manual_local_mode"
 
+    def try_remote_mode(self) -> bool:
+        self._check_remote_backend()
+        return self.is_using_remote()
+
     def get_runtime_status(self) -> str:
         if not self.is_remote_configured():
             return "课堂模式：本地"
