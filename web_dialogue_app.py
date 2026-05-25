@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from ai_provider import RemoteLessonAI
 from session_record import SessionRecord
@@ -230,6 +232,26 @@ class DialogueEngine:
         output_dir = Path.cwd() / "session_logs"
         return record.save_markdown(output_dir)
 
+    def update_container(self) -> dict[str, Any]:
+        command = os.environ.get(
+            "DEPLOY_UPDATE_COMMAND",
+            "docker compose pull hhs-class-1 && docker compose up -d hhs-class-1",
+        )
+        completed = subprocess.run(
+            command,
+            shell=True,
+            cwd=Path.cwd(),
+            text=True,
+            capture_output=True,
+            timeout=600,
+        )
+        output = "\n".join(part for part in (completed.stdout.strip(), completed.stderr.strip()) if part)
+        return {
+            "ok": completed.returncode == 0,
+            "returnCode": completed.returncode,
+            "output": output[-4000:],
+        }
+
     @staticmethod
     def _match_preset(question: str) -> PresetAnswer | None:
         normalized = _normalize_text(question)
@@ -381,6 +403,22 @@ class DialogueRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         payload = self._read_json()
 
+        if parsed.path == "/api/deploy/update":
+            if not self._is_deploy_request_authorized(parsed.query):
+                self._send_json({"ok": False, "error": "forbidden"}, HTTPStatus.FORBIDDEN)
+                return
+            try:
+                result = self.server.engine.update_container()
+            except subprocess.TimeoutExpired:
+                self._send_json({"ok": False, "error": "update_timeout"}, HTTPStatus.GATEWAY_TIMEOUT)
+                return
+            except OSError as exc:
+                self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+            status = HTTPStatus.OK if result["ok"] else HTTPStatus.INTERNAL_SERVER_ERROR
+            self._send_json(result, status)
+            return
+
         if parsed.path == "/api/ask":
             question = str(payload.get("question", ""))
             self._send_json(self.server.engine.answer_student_question(question))
@@ -418,6 +456,13 @@ class DialogueRequestHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
+
+    def _is_deploy_request_authorized(self, query: str) -> bool:
+        expected_token = os.environ.get("DEPLOY_WEBHOOK_TOKEN", "").strip()
+        if not expected_token:
+            return False
+        tokens = parse_qs(query).get("token", [])
+        return bool(tokens and tokens[0] == expected_token)
 
     def _send_html(self, html: str, status: HTTPStatus = HTTPStatus.OK) -> None:
         data = html.encode("utf-8")

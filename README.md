@@ -32,6 +32,70 @@ http://127.0.0.1:8000
 python main.py
 ```
 
+## Docker 运行
+
+本项目提供容器镜像配置，镜像地址：
+
+```text
+registry.cn-hangzhou.aliyuncs.com/fjrcn/hhs-class-1
+```
+
+本地构建测试：
+
+```bash
+docker build -t hhs-class-1:test .
+docker run --rm -p 8000:8000 hhs-class-1:test
+```
+
+服务器推荐使用 Docker Compose：
+
+```bash
+export DEPLOY_WEBHOOK_TOKEN="替换成一段随机密钥"
+docker compose up -d
+```
+
+`docker-compose.yml` 会把宿主机 `/var/run/docker.sock` 和当前部署目录挂载到容器中，用于 webhook 收到请求后在服务器上执行 `docker compose pull/up` 更新当前服务。
+
+服务启动后访问：
+
+```text
+http://服务器地址:8000
+```
+
+## 自动构建与自动更新
+
+仓库已配置 GitHub Actions：当 `main` 分支收到 push 时，会自动构建容器镜像并推送到阿里云容器镜像仓库，然后调用部署 webhook 更新服务器上的容器。
+
+需要在 GitHub 仓库的 `Settings -> Secrets and variables -> Actions` 中配置：
+
+- `ALIYUN_DOCKER_USERNAME`：阿里云容器镜像仓库用户名。
+- `ALIYUN_DOCKER_PASSWORD`：阿里云容器镜像仓库密码。
+- `DEPLOY_WEBHOOK_URL`：服务器更新接口完整 URL。
+
+`DEPLOY_WEBHOOK_URL` 示例：
+
+```text
+https://your-domain.example.com/api/deploy/update?token=替换成同一个随机密钥
+```
+
+服务器上的课堂 Web 服务会处理：
+
+```text
+POST /api/deploy/update?token=<DEPLOY_WEBHOOK_TOKEN>
+```
+
+token 必须和服务器环境变量 `DEPLOY_WEBHOOK_TOKEN` 一致。鉴权通过后，服务默认启动一个临时 updater 容器，由它延迟执行更新，避免课堂服务在 HTTP 响应发出前重启：
+
+```bash
+docker run -d --rm --name hhs-class-1-updater -v /var/run/docker.sock:/var/run/docker.sock -v ${PWD}:${PWD} -w ${PWD} registry.cn-hangzhou.aliyuncs.com/fjrcn/hhs-class-1:latest sh -c 'sleep 2; docker compose -f ${PWD}/docker-compose.yml --project-directory ${PWD} pull hhs-class-1 && docker compose -f ${PWD}/docker-compose.yml --project-directory ${PWD} up -d hhs-class-1'
+```
+
+如果服务器上的 compose 文件不在应用工作目录，或需要自定义更新命令，可以在服务器上设置：
+
+```bash
+export DEPLOY_UPDATE_COMMAND="docker compose -f /path/to/docker-compose.yml pull hhs-class-1 && docker compose -f /path/to/docker-compose.yml up -d hhs-class-1"
+```
+
 ## 功能流程
 
 - 预习过渡
