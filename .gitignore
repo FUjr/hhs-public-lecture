@@ -1,4 +1,5 @@
 __pycache__/
+logs/
 session_logs/
 _book_extract/
 _pdf_word_extract/

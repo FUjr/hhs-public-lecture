@@ -13,8 +13,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from app_logging import get_app_logger
 from ai_provider import RemoteLessonAI
 from session_record import SessionRecord
+
+
+logger = get_app_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -165,6 +169,7 @@ class DialogueEngine:
     def answer_student_question(self, question: str) -> dict[str, str]:
         cleaned = question.strip()
         if not cleaned:
+            logger.info("Received empty student question.")
             return {
                 "answer": "请先输入一个课堂问题。",
                 "source": "empty",
@@ -176,6 +181,7 @@ class DialogueEngine:
         preset = self._match_preset(cleaned)
         if preset is not None:
             answer = self._vary_preset_answer(preset.answer)
+            logger.info("Matched preset answer. title=%s question=%s", preset.title, cleaned)
             return {
                 "answer": answer,
                 "source": "preset",
@@ -189,6 +195,7 @@ class DialogueEngine:
             "作者写三种花的意图、衬托手法和“出淤泥而不染”的现实价值提问。"
         )
         answer = self.ai.answer_student_question(cleaned, lesson_context)
+        logger.info("Generated student question answer. usingRemote=%s lastError=%s", self.ai.is_using_remote(), self.ai.last_error)
         return {
             "answer": answer,
             "source": "generated",
@@ -200,6 +207,7 @@ class DialogueEngine:
     def respond_to_reflection(self, student_text: str) -> dict[str, str]:
         cleaned = student_text.strip()
         feedback = self.ai.respond_to_reflection(cleaned)
+        logger.info("Generated reflection feedback. usingRemote=%s lastError=%s", self.ai.is_using_remote(), self.ai.last_error)
         return {
             "prompt": AI_STUDENT_PROMPT,
             "feedback": feedback,
@@ -211,6 +219,7 @@ class DialogueEngine:
     def respond_to_follow_up(self, follow_up: str, student_text: str) -> dict[str, str]:
         cleaned = student_text.strip()
         if not cleaned:
+            logger.info("Received empty follow-up response.")
             return {
                 "response": "可以先让学生用一句话回应这个追问，再补充一个具体理由。",
                 "runtimeStatus": self.ai.get_runtime_status(),
@@ -218,6 +227,7 @@ class DialogueEngine:
             }
 
         response = self._build_follow_up_response(follow_up, cleaned)
+        logger.info("Generated follow-up response.")
         return {
             "response": response,
             "runtimeStatus": self.ai.get_runtime_status(),
@@ -253,7 +263,9 @@ class DialogueEngine:
                 record.add_reflection(response, combined_feedback)
 
         output_dir = Path.cwd() / "session_logs"
-        return record.save_markdown(output_dir)
+        output_path = record.save_markdown(output_dir)
+        logger.info("Saved classroom record. path=%s", output_path)
+        return output_path
 
     def update_container(self) -> dict[str, Any]:
         command = os.environ.get(
@@ -269,6 +281,7 @@ class DialogueEngine:
             timeout=600,
         )
         output = "\n".join(part for part in (completed.stdout.strip(), completed.stderr.strip()) if part)
+        logger.info("Deploy update command finished. returnCode=%s", completed.returncode)
         return {
             "ok": completed.returncode == 0,
             "returnCode": completed.returncode,
@@ -414,6 +427,7 @@ class DialogueRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        logger.info("GET %s", parsed.path)
         if parsed.path == "/":
             self._send_html(HTML_PAGE)
             return
@@ -425,6 +439,7 @@ class DialogueRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         payload = self._read_json()
+        logger.info("POST %s", parsed.path)
 
         if parsed.path == "/api/deploy/update":
             if not self._is_deploy_request_authorized(parsed.query):
@@ -475,7 +490,8 @@ class DialogueRequestHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"[{timestamp}] {self.address_string()} {format % args}")
+        message = f"[{timestamp}] {self.address_string()} {format % args}"
+        logger.info(message)
 
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0") or 0)

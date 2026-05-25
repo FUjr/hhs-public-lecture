@@ -8,6 +8,11 @@ from abc import ABC, abstractmethod
 from collections import deque
 from urllib.parse import urlparse
 
+from app_logging import get_app_logger
+
+
+logger = get_app_logger(__name__)
+
 
 class AIProvider(ABC):
     @abstractmethod
@@ -120,6 +125,8 @@ class MockLessonAI(AIProvider):
 
 
 class RemoteLessonAI(AIProvider):
+    REQUEST_ERROR_TEXT = "请求错误：AI 后端响应异常，请检查接口配置、网络状态或稍后重试。"
+
     def __init__(
         self,
         reflection_prompt: str,
@@ -198,11 +205,17 @@ class RemoteLessonAI(AIProvider):
         if not self.endpoint or not self.api_key:
             self.last_call_used_remote = False
             self.last_error = "missing_config"
+            logger.info("AI backend is not configured; using local fallback.")
             return fallback_text
 
         if not self.remote_available:
             self.last_call_used_remote = False
-            return fallback_text
+            if self.last_error == "manual_local_mode":
+                logger.info("Runtime is in manual local mode; using local fallback.")
+                return fallback_text
+            error = self.last_error or "remote_unavailable"
+            logger.warning("AI backend is unavailable; returning request error prompt. error=%s", error)
+            return self._request_error_text(error)
 
         try:
             text = self._request_remote(prompt)
@@ -210,27 +223,32 @@ class RemoteLessonAI(AIProvider):
             self.last_call_used_remote = False
             self.last_error = f"http_{exc.code}"
             self.remote_available = False
-            return fallback_text
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+            logger.warning("AI request failed with HTTP error. status=%s reason=%s", exc.code, exc.reason)
+            return self._request_error_text(self.last_error)
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
             self.last_call_used_remote = False
             self.last_error = "request_failed"
             self.remote_available = False
-            return fallback_text
+            logger.warning("AI request failed. error=%s", exc)
+            return self._request_error_text(self.last_error)
 
         if text and text.strip():
             self.last_call_used_remote = True
             self.last_error = None
+            logger.info("AI request succeeded.")
             return text.strip()
 
         self.last_call_used_remote = False
         self.last_error = "empty_response"
         self.remote_available = False
-        return fallback_text
+        logger.warning("AI request returned an empty response.")
+        return self._request_error_text(self.last_error)
 
     def _check_remote_backend(self) -> None:
         if not self.endpoint or not self.api_key:
             self.remote_available = False
             self.last_error = "missing_config"
+            logger.info("AI backend health check skipped because configuration is missing.")
             return
 
         try:
@@ -238,20 +256,31 @@ class RemoteLessonAI(AIProvider):
         except urllib.error.HTTPError as exc:
             self.remote_available = False
             self.last_error = f"http_{exc.code}"
+            logger.warning("AI backend health check failed with HTTP error. status=%s reason=%s", exc.code, exc.reason)
             return
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
             self.remote_available = False
             self.last_error = "request_failed"
+            logger.warning("AI backend health check failed. error=%s", exc)
             return
 
         if text.strip():
             self.remote_available = True
             self.last_call_used_remote = True
             self.last_error = None
+            logger.info("AI backend health check succeeded.")
             return
 
         self.remote_available = False
         self.last_error = "empty_response"
+        logger.warning("AI backend health check returned an empty response.")
+
+    def _request_error_text(self, error: str) -> str:
+        if error.startswith("http_"):
+            return f"{self.REQUEST_ERROR_TEXT}（错误：{error}）"
+        if error == "empty_response":
+            return "请求错误：AI 后端返回为空，请检查模型输出或稍后重试。"
+        return self.REQUEST_ERROR_TEXT
 
     def _request_remote(self, prompt: str) -> str:
         payload = self._build_payload(prompt)
@@ -420,6 +449,7 @@ class RemoteLessonAI(AIProvider):
         self.remote_available = False
         self.last_call_used_remote = False
         self.last_error = "manual_local_mode"
+        logger.info("Runtime switched to local mode manually.")
 
     def try_remote_mode(self) -> bool:
         self._check_remote_backend()
@@ -430,6 +460,8 @@ class RemoteLessonAI(AIProvider):
             return "课堂模式：本地"
         if self.is_using_remote():
             return "AI后端已连接"
+        if self.last_error and self.last_error not in ("missing_config", "manual_local_mode"):
+            return "AI后端请求错误"
         return "课堂模式：本地"
 
     @staticmethod
