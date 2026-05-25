@@ -75,3 +75,17 @@ python main.py
 - 学生问 AI 会按问题类型分别生成回答，不再尽量套用同一种句式。
 - AI 问学生的点评会根据学生立场变化，更像课堂上的即时回应。
 - 程序会尽量避开最近几次回答的重复开头，减少“翻来覆去是同一句话”的感觉。
+
+## 推送到 GitHub
+
+本项目已配置远端仓库：
+
+```text
+git@github.com:FUjr/hhs-public-lecture.git
+```
+
+后续修改后，可以运行：
+
+```powershell
+.\scripts\auto_push.ps1 -Message "Update classroom dialogue"
+```
