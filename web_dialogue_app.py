@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import mimetypes
 import os
+import re
 import socket
 import subprocess
 import tempfile
@@ -28,9 +30,42 @@ GENERATED_DIR = ROOT / "public" / "generated-lessons"
 
 
 def load_dotenv() -> None:
-    env_path = ROOT / ".env"
-    if not env_path.exists():
-        return
+    loaded_paths = []
+    for env_path in dotenv_candidates():
+        if env_path.exists():
+            load_env_file(env_path)
+            loaded_paths.append(str(env_path))
+    logger.info(
+        "Prep env loaded. paths=%s token=%s repo=%s sshKey=%s aiEndpoint=%s",
+        loaded_paths,
+        secret_fingerprint(os.environ.get("PREP_MODE_TOKEN", "")),
+        bool(os.environ.get("PREP_GIT_REPO", "").strip()),
+        secret_fingerprint(os.environ.get("PREP_GIT_SSH_PRIVATE_KEY", "")),
+        bool(os.environ.get("PREP_AI_ENDPOINT", "").strip()),
+    )
+
+
+def dotenv_candidates() -> list[Path]:
+    candidates = [ROOT / ".env", Path.cwd() / ".env"]
+    deploy_command = os.environ.get("DEPLOY_UPDATE_COMMAND", "")
+    for token in re.findall(r"(?:-f|--project-directory)\s+([^\s]+)", deploy_command):
+        path = Path(token)
+        if path.name in {"docker-compose.yml", "compose.yml"}:
+            candidates.append(path.parent / ".env")
+        else:
+            candidates.append(path / ".env")
+
+    unique = []
+    seen = set()
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique.append(resolved)
+    return unique
+
+
+def load_env_file(env_path: Path) -> None:
     for raw_line in env_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -141,6 +176,11 @@ class DialogueEngine:
         if not provided:
             provided = str(payload.get("prepToken") or "").strip()
         if not expected or provided != expected:
+            logger.warning(
+                "Prep token rejected. expected=%s provided=%s",
+                secret_fingerprint(expected),
+                secret_fingerprint(provided),
+            )
             raise PermissionError("invalid_prep_token")
 
     def _read_lesson_markdown(self, lesson: dict[str, Any]) -> str:
@@ -484,6 +524,14 @@ def main() -> None:
 
 def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def secret_fingerprint(value: str) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return "missing"
+    digest = hashlib.sha256(cleaned.encode("utf-8")).hexdigest()[:12]
+    return f"len:{len(cleaned)} sha256:{digest}"
 
 
 if __name__ == "__main__":
