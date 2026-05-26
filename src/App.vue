@@ -51,19 +51,19 @@
             <p>{{ lesson.lessonPlanSource || "lesson_plan" }}</p>
           </div>
           <div class="info-grid">
-            <article v-if="!isCardHidden('goals')" class="info-block">
+            <article class="info-block">
               <strong>目标</strong>
               <p v-for="goal in lesson.goals" :key="goal">{{ goal }}</p>
             </article>
-            <article v-if="!isCardHidden('keyPoints')" class="info-block">
+            <article class="info-block">
               <strong>重点</strong>
               <p>{{ lesson.keyPoints || "未配置" }}</p>
             </article>
-            <article v-if="!isCardHidden('difficultPoints')" class="info-block">
+            <article class="info-block">
               <strong>难点</strong>
               <p>{{ lesson.difficultPoints || "未配置" }}</p>
             </article>
-            <article v-if="!isCardHidden('coreStatement')" class="info-block">
+            <article class="info-block">
               <strong>核心问题</strong>
               <p>{{ lesson.aiStudentPrompt }}</p>
             </article>
@@ -264,6 +264,13 @@
             <h2>备课模式</h2>
             <p>生成、粘贴或编辑导学案模板，保存后推送到 lesson-drafts 分支。</p>
           </div>
+          <div class="prep-help">
+            <strong>使用流程</strong>
+            <span>1. 输入备课 Token 并校验。</span>
+            <span>2. 可粘贴课文原文和简要思路生成模板，也可粘贴已有导学案解析。</span>
+            <span>3. 在编辑模板中调整问题提示、AI 提问和预设问答。</span>
+            <span>4. 保存会进入草稿分支；确认后加载草稿并合并到 v2。</span>
+          </div>
           <label>
             <span>备课 Token</span>
             <input v-model="prepToken" type="password" placeholder="请输入备课 token" @change="persistPrepToken" />
@@ -445,6 +452,7 @@
       <label>
         <span>课文</span>
         <select v-model="selectedLessonId">
+          <option value="">自动选择第一篇课文</option>
           <option v-for="item in lessonIndex.lessons" :key="item.id" :value="item.id">{{ item.title }}</option>
         </select>
       </label>
@@ -461,9 +469,9 @@
         <input v-model="settingsDraft.model" placeholder="deepseek-ai/DeepSeek-V4-Flash" />
       </label>
       <div class="settings-card-toggle">
-        <span>隐藏课堂脉络卡片</span>
-        <label v-for="item in overviewCardOptions" :key="item.key" class="check-row">
-          <input type="checkbox" :value="item.key" v-model="settingsDraft.hiddenCards" />
+        <span>隐藏顶部菜单</span>
+        <label v-for="item in tabOptions" :key="item.key" class="check-row">
+          <input type="checkbox" :value="item.key" v-model="settingsDraft.hiddenTabs" />
           <span>{{ item.label }}</span>
         </label>
       </div>
@@ -495,7 +503,7 @@ import { answerStudentQuestion, respondToFollowUp as requestFollowUp, respondToR
 import { buildSettingsImportUrl, defaultSettings, importSettingsFromUrl, loadLessonId, loadPrepToken, saveLessonId, savePrepToken, saveSettings } from "./services/storage";
 import { downloadSessionMarkdown } from "./services/record";
 
-const tabs = [
+const tabOptions = [
   { key: "overview", label: "课堂脉络" },
   { key: "ask", label: "学生问 AI" },
   { key: "reflect", label: "AI 问学生" },
@@ -506,13 +514,6 @@ const prepModes = [
   { key: "paste", label: "粘贴导学案" },
   { key: "edit", label: "编辑模板" },
 ];
-const overviewCardOptions = [
-  { key: "goals", label: "目标" },
-  { key: "keyPoints", label: "重点" },
-  { key: "difficultPoints", label: "难点" },
-  { key: "coreStatement", label: "核心问题" },
-];
-
 const activeTab = ref("overview");
 const lesson = ref({});
 const lessonIndex = reactive({ lessons: [] });
@@ -552,12 +553,17 @@ const activeTaskLabel = computed(() => activeTask.value?.label || "AI思考中..
 const isQuestionBusy = computed(() => isRunningTask("ask-new") || Boolean(activeTask.value?.type === "ask-regen"));
 const isFollowUpBusy = computed(() => isRunningTask("follow-up-new") || Boolean(activeTask.value?.type === "follow-up-regen"));
 const prepModeTitle = computed(() => prepModes.find((item) => item.key === prepMode.value)?.label || "备课模式");
+const tabs = computed(() => {
+  const hidden = Array.isArray(settings.value.hiddenTabs) ? settings.value.hiddenTabs : [];
+  const visible = tabOptions.filter((tab) => !hidden.includes(tab.key));
+  return visible.length ? visible : tabOptions;
+});
 
 onMounted(async () => {
   try {
     const index = await loadLessonIndex();
     lessonIndex.lessons = Array.isArray(index.lessons) ? index.lessons : [];
-    selectedLessonId.value = loadLessonId() || lessonIndex.lessons[0]?.id || "";
+    selectedLessonId.value = resolveLessonId(loadLessonId());
     await switchLesson(selectedLessonId.value);
     if (importedSettingsResult.imported) {
       showToast("AI 配置已从链接导入");
@@ -571,22 +577,43 @@ onMounted(async () => {
 });
 
 watch(selectedLessonId, async (id, previous) => {
-  if (id && previous && id !== previous) {
-    await switchLesson(id);
+  const resolved = resolveLessonId(id);
+  if (!id && resolved) {
+    selectedLessonId.value = resolved;
+    return;
+  }
+  if (resolved && previous && resolved !== previous) {
+    await switchLesson(resolved);
+  }
+});
+
+watch(tabs, (visibleTabs) => {
+  if (!visibleTabs.some((tab) => tab.key === activeTab.value)) {
+    activeTab.value = visibleTabs[0]?.key || "overview";
   }
 });
 
 async function switchLesson(id) {
-  if (!id) {
+  const resolved = resolveLessonId(id);
+  if (!resolved) {
     return;
   }
-  lesson.value = normalizeLesson(localPreviewLessons[id] || await loadLesson(id));
-  saveLessonId(id);
+  lesson.value = normalizeLesson(localPreviewLessons[resolved] || await loadLesson(resolved));
+  selectedLessonId.value = resolved;
+  saveLessonId(resolved);
   studentQuestions.value = [];
   reflections.value = [];
   questionInput.value = "";
   reflectionInput.value = "";
   followUpInput.value = "";
+}
+
+function resolveLessonId(id) {
+  const candidate = String(id || "").trim();
+  if (candidate && lessonIndex.lessons.some((item) => item.id === candidate)) {
+    return candidate;
+  }
+  return lessonIndex.lessons[0]?.id || "";
 }
 
 async function askQuestion(forceQuestion, options = {}) {
@@ -1157,12 +1184,8 @@ function normalizePresets(presets) {
     : [];
 }
 
-function isCardHidden(key) {
-  return Array.isArray(settings.value.hiddenCards) && settings.value.hiddenCards.includes(key);
-}
-
 function cloneSettings(source) {
-  return { ...source, hiddenCards: Array.isArray(source.hiddenCards) ? [...source.hiddenCards] : [] };
+  return { ...source, hiddenTabs: Array.isArray(source.hiddenTabs) ? [...source.hiddenTabs] : [] };
 }
 
 function prepErrorText(error) {

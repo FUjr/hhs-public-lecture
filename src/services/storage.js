@@ -49,7 +49,7 @@ export function defaultSettings() {
     apiKey: "",
     model: "deepseek-ai/DeepSeek-V4-Flash",
     aiMode: "local",
-    hiddenCards: [],
+    hiddenTabs: [],
   };
 }
 
@@ -102,12 +102,12 @@ function normalizeSettings(source = {}) {
     apiKey: typeof source.apiKey === "string" ? source.apiKey : "",
     model: typeof source.model === "string" && source.model ? source.model : defaults.model,
     aiMode,
-    hiddenCards: normalizeHiddenCards(source.hiddenCards),
+    hiddenTabs: normalizeHiddenTabs(source.hiddenTabs || source.hiddenCards),
   };
 }
 
-function normalizeHiddenCards(value) {
-  const allowed = ["goals", "keyPoints", "difficultPoints", "coreStatement"];
+function normalizeHiddenTabs(value) {
+  const allowed = ["overview", "ask", "reflect", "prep"];
   return Array.isArray(value) ? value.filter((item) => allowed.includes(item)) : [];
 }
 

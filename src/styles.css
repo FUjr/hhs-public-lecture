@@ -648,6 +648,24 @@ select:focus,
   align-self: start;
 }
 
+.prep-help {
+  display: grid;
+  gap: 6px;
+  margin: 14px 18px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.prep-help strong {
+  color: var(--green);
+  font-size: 15px;
+}
+
 .prep-sidebar label,
 .prep-editor label {
   display: grid;

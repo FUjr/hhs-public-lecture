@@ -160,9 +160,10 @@ class DialogueEngine:
 
     def merge_prep_draft(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._require_prep_token(payload)
-        lesson_id = generate_lessons.slugify(str(payload.get("lessonId") or payload.get("id") or "").strip())
-        if not lesson_id:
+        draft_lesson_id = str(payload.get("lessonId") or payload.get("id") or "").strip()
+        if not draft_lesson_id:
             raise ValueError("lesson_id_required")
+        lesson_id = generate_lessons.slugify(draft_lesson_id)
 
         draft_branch = self._prep_branch()
         target_branch = self._target_branch()
@@ -179,13 +180,14 @@ class DialogueEngine:
             if checkout.returncode != 0:
                 self._run_git(["git", "checkout", "-b", target_branch], workdir, env)
 
-            draft = self._read_lesson_from_git_ref(workdir, env, f"origin/{draft_branch}", lesson_id)
+            draft = self._read_lesson_from_git_ref(workdir, env, f"origin/{draft_branch}", draft_lesson_id)
             lesson = _dict(draft.get("lesson"))
             markdown = str(draft.get("markdown") or "").strip()
             if not lesson or not markdown:
                 raise ValueError("draft_lesson_not_found")
 
-            markdown_path = str(lesson.get("lessonPlanSource") or f"lesson_plan/{lesson_id}.md")
+            lesson = self._normalize_lesson_json(lesson, lesson_id, markdown, "prep")
+            markdown_path = f"lesson_plan/{lesson_id}.md"
             lesson_path = f"public/generated-lessons/{lesson_id}.json"
             (workdir / markdown_path).parent.mkdir(parents=True, exist_ok=True)
             (workdir / markdown_path).write_text(markdown.rstrip() + "\n", encoding="utf-8")
@@ -519,6 +521,7 @@ class DialogueRequestHandler(BaseHTTPRequestHandler):
             except PermissionError:
                 self._send_json({"ok": False, "error": "forbidden"}, HTTPStatus.FORBIDDEN)
             except ValueError as exc:
+                logger.warning("Prep API rejected request. path=%s error=%s payloadKeys=%s", parsed.path, exc, sorted(payload.keys()))
                 self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
             except RuntimeError as exc:
                 logger.exception("Prep API failed. path=%s", parsed.path)
