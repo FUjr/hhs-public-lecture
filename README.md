@@ -1,5 +1,28 @@
 # 课堂模板平台 v2
 
+## 面向教师的功能介绍
+
+这是一个面向语文课堂的 AI 互动工具。教师可以选择课文模板，直接开展“学生问 AI”和“AI 问学生”两个课堂环节：学生提出问题后，系统会结合课文内容生成课堂式回答；学生表达观点后，系统会生成点评和追问，帮助教师把讨论推进到文本依据、表达逻辑和现实思考。
+
+平台内置课堂脉络、学习目标、提问提示、思考步骤和课堂记录下载。AI 不可用时会自动回到本地模板，保证课堂流程不中断；配置远程 AI 后，回答会优先通过同源后端代理生成。
+
+## 教师使用说明
+
+1. 打开页面后，左下角点击设置按钮。
+2. 在“课文”中选择本节课模板。
+3. 默认已内置 SiliconFlow API Endpoint 和模型 `deepseek-ai/DeepSeek-V4-Flash`，只需要填写 API Key。
+4. 保持“优先使用远程 AI”勾选，点击“保存”。
+5. 点击顶部状态按钮或设置里的“测试连接”，看到“AI后端已连接”即可使用。
+6. 在“学生问 AI”中输入学生问题，点击提交问题。
+7. 在“AI 问学生”中输入学生观点，生成点评后可继续输入学生对追问的回应。
+8. 课堂结束后，在“学生问 AI”页面点击“保存记录”，下载本节课 Markdown 记录。
+
+## AI 配置分享与导入
+
+设置页支持“导出配置链接”。教师配置好 Endpoint、API Key、模型和远程优先开关后，点击“生成链接”，系统会生成一个包含 Base64 编码 AI 配置的 URL，并尽量自动复制到剪贴板。
+
+其他设备或浏览器打开这个 URL 后，会自动导入 AI 配置到当前浏览器的 `localStorage`，随后地址栏中的配置参数会被清理。这个链接包含 API Key，请只发给可信任的使用者，不要公开发布。
+
 这是一个 Vue 重构后的课堂互动模板平台。前端负责课文模板展示、课堂脉络、学生问 AI、AI 问学生、设置与课堂记录下载；后端只保留 AI 代理和容器更新 webhook。
 
 ## 本地开发
@@ -51,10 +74,13 @@ python scripts/generate_lessons.py
 左下角设置按钮支持：
 
 - 切换课文。
-- 填写 API endpoint、API key、model。
+- 默认 API endpoint：`https://api.siliconflow.cn/v1/chat/completions`。
+- 默认模型：`deepseek-ai/DeepSeek-V4-Flash`。
+- 教师通常只需要填写 SiliconFlow API Key。
 - 选择是否优先使用远程 AI。
+- 导出一个可自动导入的 AI 配置链接。
 
-这些设置只保存在当前浏览器 `localStorage`。AI 请求仍通过同源 Python 后端代理发出，不会写入仓库、镜像或服务端文件。
+这些设置只保存在当前浏览器 `localStorage`。AI 请求仍通过同源 Python 后端代理发出，不会写入仓库、镜像或服务端文件。导出的配置链接会包含 API Key，请谨慎分享。
 
 ## AI 配置
 
@@ -69,7 +95,7 @@ python scripts/generate_lessons.py
 - `LESSON_AI_API_KEY`
 - `LESSON_AI_MODEL`
 
-前端设置中填写的 API 配置优先于服务端环境变量。
+前端设置中填写的 API 配置优先于服务端环境变量。未修改前端设置时，浏览器默认使用 SiliconFlow 兼容接口和 `deepseek-ai/DeepSeek-V4-Flash` 模型，只需补充 API Key。
 
 ## Docker
 

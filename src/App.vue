@@ -194,7 +194,7 @@
     <form class="settings-panel" @submit.prevent="saveSettingsForm">
       <div class="panel-header">
         <h2>设置</h2>
-        <p>配置只保存在当前浏览器。API 请求通过同源后端代理发送。</p>
+        <p>默认使用 SiliconFlow 兼容接口，只填写 API Key 即可启用远程 AI。</p>
       </div>
       <label>
         <span>课文</span>
@@ -208,7 +208,7 @@
       </label>
       <label>
         <span>API Key</span>
-        <input v-model="settingsDraft.apiKey" type="password" placeholder="只保存在当前浏览器" />
+        <input v-model="settingsDraft.apiKey" type="password" placeholder="填写 SiliconFlow API Key" />
       </label>
       <label>
         <span>Model</span>
@@ -218,6 +218,14 @@
         <input v-model="settingsDraft.preferRemote" type="checkbox" />
         <span>优先使用远程 AI</span>
       </label>
+      <div class="export-config-box">
+        <div>
+          <strong>导出配置链接</strong>
+          <span>链接包含 API Key，打开后会自动导入当前 AI 配置。</span>
+        </div>
+        <button class="ghost-button" type="button" @click="exportSettingsUrl">生成链接</button>
+        <input v-if="exportedSettingsUrl" :value="exportedSettingsUrl" readonly @focus="$event.target.select()" />
+      </div>
       <div class="settings-actions">
         <button class="ghost-button" type="button" @click="resetSettingsForm">恢复默认</button>
         <button class="ghost-button" type="button" @click="testConnection">测试连接</button>
@@ -233,7 +241,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { callApi, loadLesson, loadLessonIndex } from "./services/api";
 import { buildFallbackAnswer, buildFollowUpResponse, buildReflectionFeedback } from "./services/localAi";
-import { defaultSettings, loadLessonId, loadSettings, saveLessonId, saveSettings } from "./services/storage";
+import { buildSettingsImportUrl, defaultSettings, importSettingsFromUrl, loadLessonId, loadSettings, saveLessonId, saveSettings } from "./services/storage";
 import { downloadSessionMarkdown } from "./services/record";
 
 const tabs = [
@@ -246,13 +254,15 @@ const activeTab = ref("overview");
 const lesson = ref({});
 const lessonIndex = reactive({ lessons: [] });
 const selectedLessonId = ref("");
-const settings = ref(loadSettings());
+const importedSettingsResult = importSettingsFromUrl();
+const settings = ref(importedSettingsResult.settings);
 const settingsDraft = reactive({ ...settings.value });
 const settingsOpen = ref(false);
 const runtimeStatus = ref("课堂模式：本地");
 const loadError = ref("");
 const busy = ref(false);
 const toastText = ref("");
+const exportedSettingsUrl = ref("");
 const questionInput = ref("");
 const reflectionInput = ref("");
 const followUpInput = ref("");
@@ -269,6 +279,11 @@ onMounted(async () => {
     selectedLessonId.value = loadLessonId() || lessonIndex.lessons[0]?.id || "";
     await switchLesson(selectedLessonId.value);
     runtimeStatus.value = settings.value.preferRemote ? "远程 AI 优先" : "课堂模式：本地";
+    if (importedSettingsResult.imported) {
+      showToast("AI 配置已从链接导入");
+    } else if (importedSettingsResult.error) {
+      showToast(importedSettingsResult.error);
+    }
   } catch (error) {
     loadError.value = "课文模板加载失败，请确认 public/generated-lessons/index.json 已生成。";
   }
@@ -384,14 +399,15 @@ async function runAiTask(detail, request, fallback) {
 }
 
 async function testConnection() {
-  if (!settings.value.endpoint && !settings.value.apiKey) {
-    showToast("未配置前端 API，当前使用本地模板");
+  const config = settingsOpen.value ? { ...settingsDraft } : settings.value;
+  if (!config.endpoint || !config.apiKey) {
+    showToast("请先填写 API Key");
     runtimeStatus.value = "课堂模式：本地";
     return;
   }
   busy.value = true;
   try {
-    const result = await callApi("/api/runtime/test", buildAiPayload({ lesson: lesson.value }));
+    const result = await callApi("/api/runtime/test", buildAiPayload({ lesson: lesson.value }, config));
     runtimeStatus.value = result.usingRemote ? "AI后端已连接" : "AI后端请求错误";
     showToast(result.usingRemote ? "AI后端已连接" : "AI后端不可用");
   } catch {
@@ -402,13 +418,13 @@ async function testConnection() {
   }
 }
 
-function buildAiPayload(payload) {
+function buildAiPayload(payload, config = settings.value) {
   return {
     ...payload,
     clientConfig: {
-      endpoint: settings.value.endpoint,
-      apiKey: settings.value.apiKey,
-      model: settings.value.model,
+      endpoint: config.endpoint,
+      apiKey: config.apiKey,
+      model: config.model,
     },
   };
 }
@@ -429,6 +445,7 @@ function saveRecord() {
 function saveSettingsForm() {
   settings.value = { ...settingsDraft };
   saveSettings(settings.value);
+  exportedSettingsUrl.value = "";
   settingsOpen.value = false;
   runtimeStatus.value = settings.value.preferRemote ? "远程 AI 优先" : "课堂模式：本地";
   showToast("设置已保存");
@@ -436,6 +453,18 @@ function saveSettingsForm() {
 
 function resetSettingsForm() {
   Object.assign(settingsDraft, defaultSettings());
+  exportedSettingsUrl.value = "";
+}
+
+async function exportSettingsUrl() {
+  const url = buildSettingsImportUrl(settingsDraft);
+  exportedSettingsUrl.value = url;
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast("配置链接已复制");
+  } catch {
+    showToast("配置链接已生成，请手动复制");
+  }
 }
 
 function showToast(text) {

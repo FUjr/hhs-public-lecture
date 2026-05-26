@@ -141,7 +141,7 @@ def build_fallback_lesson(path: Path, markdown: str) -> dict:
 def generate_with_ai(markdown: str, fallback: dict) -> dict | None:
     endpoint = os.getenv("V2_LESSON_AI_ENDPOINT", "").strip()
     api_key = os.getenv("V2_LESSON_AI_API_KEY", "").strip()
-    model = os.getenv("V2_LESSON_AI_MODEL", "gpt-4.1-mini").strip()
+    model = os.getenv("V2_LESSON_AI_MODEL", "deepseek-ai/DeepSeek-V4-Flash").strip()
     if not endpoint:
         return None
 

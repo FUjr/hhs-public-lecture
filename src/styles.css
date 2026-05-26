@@ -593,6 +593,40 @@ select:focus,
   min-height: 0;
 }
 
+.export-config-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin: 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-2);
+}
+
+.export-config-box strong,
+.export-config-box span {
+  display: block;
+}
+
+.export-config-box strong {
+  color: var(--green);
+}
+
+.export-config-box span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.export-config-box input {
+  grid-column: 1 / -1;
+  width: 100%;
+  font-size: 13px;
+}
+
 .settings-actions {
   border-top: 1px solid var(--line);
   padding: 14px 18px 18px;
@@ -650,6 +684,7 @@ select:focus,
   }
 
   .composer,
+  .export-config-box,
   .thinking-steps,
   .reflection-hints,
   .info-grid {

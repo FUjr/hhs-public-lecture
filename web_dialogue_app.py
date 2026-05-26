@@ -134,7 +134,7 @@ class DialogueEngine:
         config = _dict(payload.get("clientConfig"))
         endpoint = str(config.get("endpoint") or os.getenv("V2_LESSON_AI_ENDPOINT") or os.getenv("LESSON_AI_ENDPOINT") or "").strip()
         api_key = str(config.get("apiKey") or os.getenv("V2_LESSON_AI_API_KEY") or os.getenv("LESSON_AI_API_KEY") or "").strip()
-        model = str(config.get("model") or os.getenv("V2_LESSON_AI_MODEL") or os.getenv("LESSON_AI_MODEL") or "gpt-4.1-mini").strip()
+        model = str(config.get("model") or os.getenv("V2_LESSON_AI_MODEL") or os.getenv("LESSON_AI_MODEL") or "deepseek-ai/DeepSeek-V4-Flash").strip()
         return RemoteLessonAI(
             reflection_prompt=str(lesson.get("aiStudentPrompt") or ""),
             endpoint=endpoint or None,
