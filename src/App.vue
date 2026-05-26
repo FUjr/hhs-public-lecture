@@ -51,19 +51,19 @@
             <p>{{ lesson.lessonPlanSource || "lesson_plan" }}</p>
           </div>
           <div class="info-grid">
-            <article class="info-block">
+            <article v-if="!isCardHidden('goals')" class="info-block">
               <strong>目标</strong>
               <p v-for="goal in lesson.goals" :key="goal">{{ goal }}</p>
             </article>
-            <article class="info-block">
+            <article v-if="!isCardHidden('keyPoints')" class="info-block">
               <strong>重点</strong>
               <p>{{ lesson.keyPoints || "未配置" }}</p>
             </article>
-            <article class="info-block">
+            <article v-if="!isCardHidden('difficultPoints')" class="info-block">
               <strong>难点</strong>
               <p>{{ lesson.difficultPoints || "未配置" }}</p>
             </article>
-            <article class="info-block">
+            <article v-if="!isCardHidden('coreStatement')" class="info-block">
               <strong>核心问题</strong>
               <p>{{ lesson.aiStudentPrompt }}</p>
             </article>
@@ -271,6 +271,7 @@
           <div class="prep-actions">
             <button class="ghost-button" type="button" :disabled="prepBusy" @click="verifyPrepToken">校验 Token</button>
             <button class="ghost-button" type="button" :disabled="prepBusy" @click="loadTemplatesForPrep">加载现有模板</button>
+            <button class="ghost-button" type="button" :disabled="prepBusy" @click="loadDraftsForPrep">加载草稿分支</button>
           </div>
           <div class="prep-mode-tabs">
             <button
@@ -290,6 +291,16 @@
               <option v-for="item in prepTemplates" :key="item.id" :value="item.id">{{ item.lesson.title }}</option>
             </select>
           </label>
+          <label v-if="prepDrafts.length">
+            <span>草稿分支</span>
+            <select v-model="selectedPrepDraftId" @change="selectPrepDraft">
+              <option value="">选择要合并的草稿</option>
+              <option v-for="item in prepDrafts" :key="item.id" :value="item.id">{{ item.lesson.title }}</option>
+            </select>
+          </label>
+          <div v-if="selectedPrepDraftId" class="prep-actions">
+            <button class="action-button" type="button" :disabled="prepBusy" @click="mergeSelectedDraft">合并到 v2</button>
+          </div>
         </aside>
 
         <section class="panel prep-main">
@@ -365,10 +376,43 @@
               <span>问题提示（每行一条）</span>
               <textarea v-model="prepTextFields.questionCues" placeholder="每行一条学生提问提示"></textarea>
             </label>
-            <label>
-              <span>预设问答 JSON</span>
-              <textarea v-model="prepTextFields.presetsJson" placeholder="数组 JSON：[{ title, category, question, keywords, answer }]"></textarea>
-            </label>
+            <section class="preset-editor" aria-label="预设问答">
+              <div class="section-toolbar">
+                <div>
+                  <strong>预设问答</strong>
+                  <span>学生提问命中关键词时优先使用这些答案。</span>
+                </div>
+                <button class="ghost-button" type="button" :disabled="prepBusy" @click="addPrepPreset">新增问答</button>
+              </div>
+              <article v-for="(preset, index) in prepLesson.presets" :key="index" class="preset-card">
+                <div class="prep-form-grid">
+                  <label>
+                    <span>标题</span>
+                    <input v-model="preset.title" placeholder="例如：托物言志" />
+                  </label>
+                  <label>
+                    <span>分类</span>
+                    <input v-model="preset.category" placeholder="内容理解 / 写法分析 / 现实思考" />
+                  </label>
+                </div>
+                <label>
+                  <span>学生问题</span>
+                  <textarea v-model="preset.question" placeholder="学生可能提出的问题"></textarea>
+                </label>
+                <label>
+                  <span>关键词（用逗号分隔）</span>
+                  <input :value="keywordsToText(preset.keywords)" placeholder="关键词1，关键词2" @input="preset.keywords = textToKeywords($event.target.value)" />
+                </label>
+                <label>
+                  <span>预设回答</span>
+                  <textarea v-model="preset.answer" placeholder="给学生看的课堂回答"></textarea>
+                </label>
+                <div class="button-row">
+                  <button class="danger-button" type="button" :disabled="prepBusy" @click="removePrepPreset(index)">删除问答</button>
+                </div>
+              </article>
+              <div v-if="!prepLesson.presets.length" class="empty-inline">暂无预设问答，可先新增一条。</div>
+            </section>
             <label>
               <span>导学案 Markdown</span>
               <textarea v-model="prepMarkdown" placeholder="导学案 Markdown 会随保存一起提交"></textarea>
@@ -416,6 +460,13 @@
         <span>Model</span>
         <input v-model="settingsDraft.model" placeholder="deepseek-ai/DeepSeek-V4-Flash" />
       </label>
+      <div class="settings-card-toggle">
+        <span>隐藏课堂脉络卡片</span>
+        <label v-for="item in overviewCardOptions" :key="item.key" class="check-row">
+          <input type="checkbox" :value="item.key" v-model="settingsDraft.hiddenCards" />
+          <span>{{ item.label }}</span>
+        </label>
+      </div>
       <div class="export-config-box">
         <div>
           <strong>导出配置链接</strong>
@@ -439,7 +490,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { loadLesson, loadLessonIndex } from "./services/api";
 import { buildFallbackAnswer, buildFollowUpResponse, buildReflectionFeedback } from "./services/localAi";
-import { generatePrepLesson, loadPrepTemplates, parsePrepMarkdown, savePrepLesson, validatePrepToken } from "./services/prepApi";
+import { generatePrepLesson, loadPrepDrafts, loadPrepTemplates, mergePrepDraft, parsePrepMarkdown, savePrepLesson, validatePrepToken } from "./services/prepApi";
 import { answerStudentQuestion, respondToFollowUp as requestFollowUp, respondToReflection as requestReflection, testRemoteAi } from "./services/remoteAi";
 import { buildSettingsImportUrl, defaultSettings, importSettingsFromUrl, loadLessonId, loadPrepToken, saveLessonId, savePrepToken, saveSettings } from "./services/storage";
 import { downloadSessionMarkdown } from "./services/record";
@@ -455,6 +506,12 @@ const prepModes = [
   { key: "paste", label: "粘贴导学案" },
   { key: "edit", label: "编辑模板" },
 ];
+const overviewCardOptions = [
+  { key: "goals", label: "目标" },
+  { key: "keyPoints", label: "重点" },
+  { key: "difficultPoints", label: "难点" },
+  { key: "coreStatement", label: "核心问题" },
+];
 
 const activeTab = ref("overview");
 const lesson = ref({});
@@ -462,7 +519,7 @@ const lessonIndex = reactive({ lessons: [] });
 const selectedLessonId = ref("");
 const importedSettingsResult = importSettingsFromUrl();
 const settings = ref(importedSettingsResult.settings);
-const settingsDraft = reactive({ ...settings.value });
+const settingsDraft = reactive(cloneSettings(settings.value));
 const settingsOpen = ref(false);
 const runtimeStatus = ref("课堂模式：本地");
 const loadError = ref("");
@@ -482,9 +539,11 @@ const prepStatus = ref("请输入备课 token 后开始。");
 const prepGenerate = reactive({ title: "", sourceText: "", brief: "" });
 const prepMarkdown = ref("");
 const prepLesson = reactive(normalizeLesson({}));
-const prepTextFields = reactive({ goals: "", questionCues: "", presetsJson: "[]" });
+const prepTextFields = reactive({ goals: "", questionCues: "" });
 const prepTemplates = ref([]);
+const prepDrafts = ref([]);
 const selectedPrepTemplateId = ref("");
+const selectedPrepDraftId = ref("");
 const localPreviewLessons = reactive({});
 
 const activeReflection = computed(() => reflections.value[reflections.value.length - 1] || null);
@@ -772,7 +831,7 @@ async function initializeAiMode() {
   const ok = await testConnection();
   if (!ok) {
     settings.value = { ...settings.value, aiMode: "local" };
-    Object.assign(settingsDraft, settings.value);
+    Object.assign(settingsDraft, cloneSettings(settings.value));
     saveSettings(settings.value);
     runtimeStatus.value = modeStatusText("local");
     showToast("API 不可用，已切换为本地模式");
@@ -785,7 +844,7 @@ async function setAiMode(mode) {
     return;
   }
   settings.value = { ...settings.value, aiMode: mode };
-  Object.assign(settingsDraft, settings.value);
+  Object.assign(settingsDraft, cloneSettings(settings.value));
   saveSettings(settings.value);
   runtimeStatus.value = modeStatusText(mode);
   showToast(mode === "llm" ? "已切换为大语言模型模式" : "已切换为本地模式");
@@ -793,7 +852,7 @@ async function setAiMode(mode) {
     const ok = await testConnection();
     if (!ok) {
       settings.value = { ...settings.value, aiMode: "local" };
-      Object.assign(settingsDraft, settings.value);
+      Object.assign(settingsDraft, cloneSettings(settings.value));
       saveSettings(settings.value);
       runtimeStatus.value = modeStatusText("local");
       showToast("API 不可用，已切换为本地模式");
@@ -821,7 +880,7 @@ function isRunningTask(type, targetIndex = undefined) {
 }
 
 function openSettings() {
-  Object.assign(settingsDraft, settings.value);
+  Object.assign(settingsDraft, cloneSettings(settings.value));
   exportedSettingsUrl.value = "";
   settingsOpen.value = true;
 }
@@ -836,7 +895,7 @@ function saveRecord() {
 }
 
 async function saveSettingsForm() {
-  settings.value = { ...settingsDraft };
+  settings.value = cloneSettings(settingsDraft);
   saveSettings(settings.value);
   exportedSettingsUrl.value = "";
   settingsOpen.value = false;
@@ -846,7 +905,7 @@ async function saveSettingsForm() {
     const ok = await testConnection();
     if (!ok) {
       settings.value = { ...settings.value, aiMode: "local" };
-      Object.assign(settingsDraft, settings.value);
+      Object.assign(settingsDraft, cloneSettings(settings.value));
       saveSettings(settings.value);
       runtimeStatus.value = modeStatusText("local");
       showToast("API 不可用，已切换为本地模式");
@@ -855,7 +914,7 @@ async function saveSettingsForm() {
 }
 
 function resetSettingsForm() {
-  Object.assign(settingsDraft, defaultSettings());
+  Object.assign(settingsDraft, cloneSettings(defaultSettings()));
   exportedSettingsUrl.value = "";
 }
 
@@ -921,6 +980,14 @@ async function loadTemplatesForPrep() {
   });
 }
 
+async function loadDraftsForPrep() {
+  await runPrepTask("正在加载草稿分支...", async () => {
+    const result = await loadPrepDrafts(prepToken.value);
+    prepDrafts.value = Array.isArray(result.lessons) ? result.lessons : [];
+    prepStatus.value = `已加载 ${prepDrafts.value.length} 个草稿。`;
+  });
+}
+
 async function generatePrep() {
   await runPrepTask("正在生成导学案模板...", async () => {
     const result = await generatePrepLesson(prepToken.value, { ...prepGenerate });
@@ -964,6 +1031,34 @@ function selectPrepTemplate() {
   prepStatus.value = `正在编辑：${item.lesson.title}`;
 }
 
+function selectPrepDraft() {
+  const item = prepDrafts.value.find((entry) => entry.id === selectedPrepDraftId.value);
+  if (!item) {
+    return;
+  }
+  applyPrepResult({ lesson: item.lesson, markdown: item.markdown });
+  prepMode.value = "edit";
+  prepStatus.value = `已选中草稿：${item.lesson.title}`;
+}
+
+async function mergeSelectedDraft() {
+  if (!selectedPrepDraftId.value) {
+    showToast("请先选择草稿");
+    return;
+  }
+  await runPrepTask("正在合并草稿到 v2...", async () => {
+    syncPrepLessonFromFields();
+    const result = await mergePrepDraft(prepToken.value, {
+      lessonId: selectedPrepDraftId.value,
+      commitMessage: `合并草稿导学案《${prepLesson.title || selectedPrepDraftId.value}》到 v2`,
+    });
+    applyPrepResult(result);
+    upsertPreviewLesson(result.lesson);
+    prepStatus.value = `已合并到 ${result.branch}，commit：${String(result.commit || "").slice(0, 8)}`;
+    showToast("草稿已合并到 v2");
+  });
+}
+
 async function runPrepTask(status, action) {
   if (!prepToken.value.trim()) {
     showToast("请先填写备课 Token");
@@ -995,18 +1090,13 @@ function applyPrepResult(result) {
 function syncPrepFieldsFromLesson() {
   prepTextFields.goals = (prepLesson.goals || []).join("\n");
   prepTextFields.questionCues = (prepLesson.questionCues || []).join("\n");
-  prepTextFields.presetsJson = JSON.stringify(prepLesson.presets || [], null, 2);
+  prepLesson.presets = normalizePresets(prepLesson.presets);
 }
 
 function syncPrepLessonFromFields() {
   prepLesson.goals = linesFromText(prepTextFields.goals);
   prepLesson.questionCues = linesFromText(prepTextFields.questionCues);
-  try {
-    const parsed = JSON.parse(prepTextFields.presetsJson || "[]");
-    prepLesson.presets = Array.isArray(parsed) ? parsed : [];
-  } catch {
-    throw new Error("预设问答 JSON 格式不正确");
-  }
+  prepLesson.presets = normalizePresets(prepLesson.presets);
 }
 
 function syncPrepFieldsSafely() {
@@ -1039,6 +1129,42 @@ function linesFromText(text) {
   return String(text || "").split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
+function addPrepPreset() {
+  prepLesson.presets.push({ title: "", category: "", question: "", keywords: [], answer: "" });
+}
+
+function removePrepPreset(index) {
+  prepLesson.presets.splice(index, 1);
+}
+
+function keywordsToText(keywords) {
+  return Array.isArray(keywords) ? keywords.join("，") : "";
+}
+
+function textToKeywords(text) {
+  return String(text || "").split(/[,，、\n]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function normalizePresets(presets) {
+  return Array.isArray(presets)
+    ? presets.map((item) => ({
+      title: String(item?.title || "").trim(),
+      category: String(item?.category || "").trim(),
+      question: String(item?.question || "").trim(),
+      keywords: Array.isArray(item?.keywords) ? item.keywords.map((keyword) => String(keyword).trim()).filter(Boolean) : textToKeywords(item?.keywords),
+      answer: String(item?.answer || "").trim(),
+    }))
+    : [];
+}
+
+function isCardHidden(key) {
+  return Array.isArray(settings.value.hiddenCards) && settings.value.hiddenCards.includes(key);
+}
+
+function cloneSettings(source) {
+  return { ...source, hiddenCards: Array.isArray(source.hiddenCards) ? [...source.hiddenCards] : [] };
+}
+
 function prepErrorText(error) {
   const message = String(error?.message || error || "");
   if (message.includes("forbidden") || message.includes("invalid_prep_token")) {
@@ -1049,6 +1175,12 @@ function prepErrorText(error) {
   }
   if (message.includes("source_or_brief_required")) {
     return "请填写课文原文或简要思路";
+  }
+  if (message.includes("lesson_id_required")) {
+    return "请先选择一个草稿";
+  }
+  if (message.includes("draft_lesson_not_found")) {
+    return "草稿分支中没有找到这篇导学案";
   }
   if (message.includes("prep_git_repo_missing")) {
     return "服务端未配置 PREP_GIT_REPO";

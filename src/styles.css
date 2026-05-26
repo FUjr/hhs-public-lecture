@@ -116,7 +116,7 @@ button:disabled {
 
 .tabs {
   display: inline-grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border: 1px solid var(--green);
   background: var(--surface);
   overflow: hidden;
@@ -725,12 +725,83 @@ select:focus,
   gap: 14px;
 }
 
+.preset-editor {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--surface-2);
+}
+
+.section-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-toolbar strong,
+.section-toolbar span,
+.empty-inline {
+  display: block;
+}
+
+.section-toolbar strong {
+  color: var(--green);
+  font-size: 17px;
+}
+
+.section-toolbar span,
+.empty-inline {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.preset-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff;
+}
+
+.preset-card textarea {
+  min-height: 92px;
+}
+
 .settings-mode-block {
   display: grid;
   gap: 8px;
   padding: 0 18px;
   color: var(--green);
   font-weight: 800;
+}
+
+.settings-card-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  padding: 0 18px;
+  color: var(--green);
+  font-weight: 800;
+}
+
+.settings-card-toggle > span {
+  grid-column: 1 / -1;
+}
+
+.settings-card-toggle .check-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 0;
+  color: var(--ink);
+  font-weight: 400;
 }
 
 .settings-mode-block p {
@@ -859,6 +930,7 @@ select:focus,
 
   .composer,
   .export-config-box,
+  .settings-card-toggle,
   .thinking-steps,
   .reflection-hints,
   .info-grid {

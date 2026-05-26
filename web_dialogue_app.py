@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -148,6 +149,59 @@ class DialogueEngine:
         commit_message = str(payload.get("commitMessage") or f"备课模式生成《{lesson.get('title', lesson_id)}》导学案模板").strip()
         commit = self._push_lesson_to_draft_branch(markdown_path, markdown, lesson_path, lesson, commit_message)
         return {"ok": True, "branch": self._prep_branch(), "commit": commit, "lesson": lesson, "markdown": markdown}
+
+    def list_prep_drafts(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_prep_token(payload)
+        with self._git_repo() as (workdir, env):
+            branch = self._prep_branch()
+            self._run_git(["git", "fetch", "origin", branch], workdir, env)
+            lessons = self._read_lessons_from_git_ref(workdir, env, f"origin/{branch}")
+        return {"branch": self._prep_branch(), "lessons": lessons}
+
+    def merge_prep_draft(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_prep_token(payload)
+        lesson_id = generate_lessons.slugify(str(payload.get("lessonId") or payload.get("id") or "").strip())
+        if not lesson_id:
+            raise ValueError("lesson_id_required")
+
+        draft_branch = self._prep_branch()
+        target_branch = self._target_branch()
+        with self._git_repo() as (workdir, env):
+            self._run_git(["git", "fetch", "origin", draft_branch], workdir, env)
+            self._run_git(["git", "fetch", "origin", target_branch], workdir, env, check=False)
+            checkout = subprocess.run(
+                ["git", "checkout", "-B", target_branch, f"origin/{target_branch}"],
+                cwd=workdir,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            if checkout.returncode != 0:
+                self._run_git(["git", "checkout", "-b", target_branch], workdir, env)
+
+            draft = self._read_lesson_from_git_ref(workdir, env, f"origin/{draft_branch}", lesson_id)
+            lesson = _dict(draft.get("lesson"))
+            markdown = str(draft.get("markdown") or "").strip()
+            if not lesson or not markdown:
+                raise ValueError("draft_lesson_not_found")
+
+            markdown_path = str(lesson.get("lessonPlanSource") or f"lesson_plan/{lesson_id}.md")
+            lesson_path = f"public/generated-lessons/{lesson_id}.json"
+            (workdir / markdown_path).parent.mkdir(parents=True, exist_ok=True)
+            (workdir / markdown_path).write_text(markdown.rstrip() + "\n", encoding="utf-8")
+            (workdir / lesson_path).parent.mkdir(parents=True, exist_ok=True)
+            (workdir / lesson_path).write_text(json.dumps(lesson, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            self._write_lesson_index(workdir, lesson)
+            self._run_git(["git", "add", markdown_path, lesson_path, "public/generated-lessons/index.json"], workdir, env)
+            diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=workdir, env=env)
+            if diff.returncode == 0:
+                commit = self._run_git(["git", "rev-parse", "HEAD"], workdir, env).strip()
+            else:
+                commit_message = str(payload.get("commitMessage") or f"合并草稿导学案《{lesson.get('title', lesson_id)}》到 v2").strip()
+                self._run_git(["git", "commit", "-m", commit_message], workdir, env)
+                self._run_git(["git", "push", "origin", target_branch], workdir, env)
+                commit = self._run_git(["git", "rev-parse", "HEAD"], workdir, env).strip()
+        return {"ok": True, "branch": target_branch, "commit": commit, "lesson": lesson, "markdown": markdown}
 
     def update_container(self) -> dict[str, Any]:
         command = os.environ.get(
@@ -290,7 +344,7 @@ class DialogueEngine:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=90) as response:
+            with urllib.request.urlopen(request, timeout=self._prep_ai_timeout()) as response:
                 raw = response.read().decode("utf-8")
             text = generate_lessons.strip_code_fence(generate_lessons.extract_ai_text(json.loads(raw)))
             parsed = json.loads(text)
@@ -307,26 +361,8 @@ class DialogueEngine:
         return "\n\n".join(parts)
 
     def _push_lesson_to_draft_branch(self, markdown_path: str, markdown: str, lesson_path: str, lesson: dict[str, Any], commit_message: str) -> str:
-        repo = os.environ.get("PREP_GIT_REPO", "").strip()
-        private_key = os.environ.get("PREP_GIT_SSH_PRIVATE_KEY", "").strip()
-        if not repo:
-            raise RuntimeError("prep_git_repo_missing")
-        if not private_key:
-            raise RuntimeError("prep_git_ssh_private_key_missing")
         branch = self._prep_branch()
-        user_name = os.environ.get("PREP_GIT_USER_NAME", "prep-bot").strip()
-        user_email = os.environ.get("PREP_GIT_USER_EMAIL", "prep-bot@example.local").strip()
-
-        with tempfile.TemporaryDirectory(prefix="lesson-prep-") as tmp:
-            workdir = Path(tmp) / "repo"
-            key_path = Path(tmp) / "prep_key"
-            key_path.write_text(private_key.replace("\\n", "\n").strip() + "\n", encoding="utf-8")
-            key_path.chmod(0o600)
-            ssh_command = f"ssh -i {key_path} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-            env = {**os.environ, "GIT_SSH_COMMAND": ssh_command}
-            self._run_git(["git", "clone", repo, str(workdir)], ROOT, env)
-            self._run_git(["git", "config", "user.name", user_name], workdir, env)
-            self._run_git(["git", "config", "user.email", user_email], workdir, env)
+        with self._git_repo() as (workdir, env):
             self._run_git(["git", "fetch", "origin", branch], workdir, env, check=False)
             checkout = subprocess.run(["git", "checkout", branch], cwd=workdir, env=env, text=True, capture_output=True)
             if checkout.returncode != 0:
@@ -344,6 +380,58 @@ class DialogueEngine:
             self._run_git(["git", "commit", "-m", commit_message], workdir, env)
             self._run_git(["git", "push", "origin", branch], workdir, env)
             return self._run_git(["git", "rev-parse", "HEAD"], workdir, env).strip()
+
+    @contextmanager
+    def _git_repo(self):
+        repo = os.environ.get("PREP_GIT_REPO", "").strip()
+        private_key = os.environ.get("PREP_GIT_SSH_PRIVATE_KEY", "").strip()
+        if not repo:
+            raise RuntimeError("prep_git_repo_missing")
+        if not private_key:
+            raise RuntimeError("prep_git_ssh_private_key_missing")
+        user_name = os.environ.get("PREP_GIT_USER_NAME", "prep-bot").strip()
+        user_email = os.environ.get("PREP_GIT_USER_EMAIL", "prep-bot@example.local").strip()
+
+        with tempfile.TemporaryDirectory(prefix="lesson-prep-") as tmp:
+            workdir = Path(tmp) / "repo"
+            key_path = Path(tmp) / "prep_key"
+            key_path.write_text(private_key.replace("\\n", "\n").strip() + "\n", encoding="utf-8")
+            key_path.chmod(0o600)
+            ssh_command = f"ssh -i {key_path} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+            env = {**os.environ, "GIT_SSH_COMMAND": ssh_command}
+            self._run_git(["git", "clone", repo, str(workdir)], ROOT, env)
+            self._run_git(["git", "config", "user.name", user_name], workdir, env)
+            self._run_git(["git", "config", "user.email", user_email], workdir, env)
+            yield workdir, env
+
+    def _read_lessons_from_git_ref(self, workdir: Path, env: dict[str, str], ref: str) -> list[dict[str, Any]]:
+        try:
+            index_raw = self._run_git(["git", "show", f"{ref}:public/generated-lessons/index.json"], workdir, env)
+            index = json.loads(index_raw)
+        except (RuntimeError, json.JSONDecodeError):
+            return []
+        lessons = []
+        for item in index.get("lessons", []) if isinstance(index, dict) else []:
+            lesson_id = str(item.get("id", "")).strip()
+            if not lesson_id:
+                continue
+            draft = self._read_lesson_from_git_ref(workdir, env, ref, lesson_id)
+            if draft:
+                lessons.append(draft)
+        return lessons
+
+    def _read_lesson_from_git_ref(self, workdir: Path, env: dict[str, str], ref: str, lesson_id: str) -> dict[str, Any]:
+        lesson_path = f"public/generated-lessons/{lesson_id}.json"
+        try:
+            lesson = json.loads(self._run_git(["git", "show", f"{ref}:{lesson_path}"], workdir, env))
+        except (RuntimeError, json.JSONDecodeError):
+            return {}
+        markdown_path = str(lesson.get("lessonPlanSource") or f"lesson_plan/{lesson_id}.md")
+        try:
+            markdown = self._run_git(["git", "show", f"{ref}:{markdown_path}"], workdir, env)
+        except RuntimeError:
+            markdown = ""
+        return {"id": lesson_id, "lesson": lesson, "markdown": markdown}
 
     def _write_lesson_index(self, workdir: Path, lesson: dict[str, Any]) -> None:
         index_path = workdir / "public/generated-lessons/index.json"
@@ -363,6 +451,16 @@ class DialogueEngine:
 
     def _prep_branch(self) -> str:
         return os.environ.get("PREP_GIT_BRANCH", "lesson-drafts").strip() or "lesson-drafts"
+
+    def _target_branch(self) -> str:
+        return os.environ.get("PREP_GIT_TARGET_BRANCH", "v2").strip() or "v2"
+
+    def _prep_ai_timeout(self) -> int:
+        raw = os.environ.get("PREP_AI_TIMEOUT_SECONDS", "300").strip()
+        try:
+            return max(30, min(900, int(raw)))
+        except ValueError:
+            return 300
 
     @staticmethod
     def _run_git(command: list[str], cwd: Path, env: dict[str, str], check: bool = True) -> str:
@@ -411,6 +509,8 @@ class DialogueRequestHandler(BaseHTTPRequestHandler):
             "/api/prep/parse": self.server.engine.parse_prep_markdown,
             "/api/prep/generate": self.server.engine.generate_prep_lesson,
             "/api/prep/save": self.server.engine.save_prep_lesson,
+            "/api/prep/drafts": self.server.engine.list_prep_drafts,
+            "/api/prep/merge-draft": self.server.engine.merge_prep_draft,
         }
         handler = routes.get(parsed.path)
         if handler:

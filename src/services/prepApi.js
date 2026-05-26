@@ -30,3 +30,11 @@ export function parsePrepMarkdown(token, payload) {
 export function savePrepLesson(token, payload) {
   return postPrep("/api/prep/save", token, payload);
 }
+
+export function loadPrepDrafts(token) {
+  return postPrep("/api/prep/drafts", token);
+}
+
+export function mergePrepDraft(token, payload) {
+  return postPrep("/api/prep/merge-draft", token, payload);
+}

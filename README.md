@@ -97,14 +97,16 @@ python scripts/generate_lessons.py
 - `PREP_MODE_TOKEN`
 - `PREP_GIT_REPO`
 - `PREP_GIT_BRANCH`，默认 `lesson-drafts`
+- `PREP_GIT_TARGET_BRANCH`，默认 `v2`
 - `PREP_GIT_SSH_PRIVATE_KEY`
 - `PREP_GIT_USER_NAME`
 - `PREP_GIT_USER_EMAIL`
 - `PREP_AI_ENDPOINT`
 - `PREP_AI_API_KEY`
 - `PREP_AI_MODEL`
+- `PREP_AI_TIMEOUT_SECONDS`，默认 `300`
 
-前端会把备课 Token 保存在浏览器 `localStorage`。备课保存会同时提交 `lesson_plan/*.md` 和 `public/generated-lessons/*.json`，并更新 `public/generated-lessons/index.json`。保存成功后当前浏览器会立即加载返回的模板用于预览，正式发布仍取决于后续合并或发布流程。
+前端会把备课 Token 保存在浏览器 `localStorage`。备课保存会同时提交 `lesson_plan/*.md` 和 `public/generated-lessons/*.json`，并更新 `public/generated-lessons/index.json`。保存成功后当前浏览器会立即加载返回的模板用于预览。备课页也可以从草稿分支加载文章，并将选中的草稿合并推送到 `PREP_GIT_TARGET_BRANCH`。
 
 ## Docker
 
