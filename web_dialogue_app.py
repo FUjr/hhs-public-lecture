@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from ai_provider import RemoteLessonAI
 from app_logging import get_app_logger
 
 
@@ -23,92 +22,6 @@ STATIC_DIR = ROOT / "dist"
 
 
 class DialogueEngine:
-    def answer_student_question(self, payload: dict[str, Any]) -> dict[str, Any]:
-        lesson = _dict(payload.get("lesson"))
-        question = str(payload.get("question", ""))
-        fallback = _dict(payload.get("fallback"))
-        ai = self._build_ai(payload, lesson)
-        if not ai.is_remote_configured():
-            return {
-                "answer": fallback.get("answer", "请先配置 AI 后端，或使用本地模板继续课堂。"),
-                "source": fallback.get("source", "local"),
-                "matchedTitle": fallback.get("matchedTitle", ""),
-                "runtimeStatus": ai.get_runtime_status(),
-                "usingRemote": False,
-            }
-        context = self._lesson_context(lesson)
-        answer = ai.answer_student_question(question, context)
-        return {
-            "answer": answer,
-            "source": "generated" if ai.is_using_remote() else fallback.get("source", "local"),
-            "matchedTitle": fallback.get("matchedTitle", ""),
-            "runtimeStatus": ai.get_runtime_status(),
-            "usingRemote": ai.is_using_remote(),
-        }
-
-    def respond_to_reflection(self, payload: dict[str, Any]) -> dict[str, Any]:
-        lesson = _dict(payload.get("lesson"))
-        response = str(payload.get("response", ""))
-        fallback = _dict(payload.get("fallback"))
-        ai = self._build_ai(payload, lesson)
-        if not ai.is_remote_configured():
-            return {
-                "feedback": fallback.get("feedback", "请先配置 AI 后端，或使用本地模板继续课堂。"),
-                "followUp": fallback.get("followUp", self._build_follow_up(response)),
-                "runtimeStatus": ai.get_runtime_status(),
-                "usingRemote": False,
-            }
-        feedback = ai.respond_to_reflection(response)
-        return {
-            "feedback": feedback,
-            "followUp": fallback.get("followUp", self._build_follow_up(response)),
-            "runtimeStatus": ai.get_runtime_status(),
-            "usingRemote": ai.is_using_remote(),
-        }
-
-    def respond_to_follow_up(self, payload: dict[str, Any]) -> dict[str, Any]:
-        lesson = _dict(payload.get("lesson"))
-        response = str(payload.get("response", ""))
-        follow_up = str(payload.get("followUp", ""))
-        fallback = _dict(payload.get("fallback"))
-        if not response.strip():
-            return {
-                "response": "可以先让学生用一句话回应这个追问，再补充一个具体理由。",
-                "runtimeStatus": "课堂模式：本地",
-                "usingRemote": False,
-            }
-        ai = self._build_ai(payload, lesson)
-        if not ai.is_remote_configured():
-            return {
-                "response": fallback.get("response", "请先配置 AI 后端，或使用本地模板继续课堂。"),
-                "runtimeStatus": ai.get_runtime_status(),
-                "usingRemote": False,
-            }
-        prompt = (
-            "你是一名七年级语文课堂助手。请根据 AI 追问和学生回应，给出 80 到 160 字的课堂式二次回应。"
-            "先接住学生观点，再推进到文本核心，不要模板腔。\n"
-            f"课文：{lesson.get('title', '当前课文')}\n"
-            f"追问：{follow_up}\n"
-            f"学生回应：{response}"
-        )
-        ai_answer = ai._ask_remote(prompt, str(fallback.get("response", "")))  # noqa: SLF001 - keep legacy provider small.
-        return {
-            "response": ai_answer,
-            "runtimeStatus": ai.get_runtime_status(),
-            "usingRemote": ai.is_using_remote(),
-        }
-
-    def test_runtime(self, payload: dict[str, Any]) -> dict[str, Any]:
-        lesson = _dict(payload.get("lesson"))
-        ai = self._build_ai(payload, lesson)
-        connected = ai.try_remote_mode()
-        return {
-            "runtimeStatus": ai.get_runtime_status(),
-            "usingRemote": ai.is_using_remote(),
-            "connected": connected,
-            "configured": ai.is_remote_configured(),
-        }
-
     def update_container(self) -> dict[str, Any]:
         command = os.environ.get(
             "DEPLOY_UPDATE_COMMAND",
@@ -130,38 +43,6 @@ class DialogueEngine:
             "output": output[-4000:],
         }
 
-    def _build_ai(self, payload: dict[str, Any], lesson: dict[str, Any]) -> RemoteLessonAI:
-        config = _dict(payload.get("clientConfig"))
-        endpoint = str(config.get("endpoint") or os.getenv("V2_LESSON_AI_ENDPOINT") or os.getenv("LESSON_AI_ENDPOINT") or "").strip()
-        api_key = str(config.get("apiKey") or os.getenv("V2_LESSON_AI_API_KEY") or os.getenv("LESSON_AI_API_KEY") or "").strip()
-        model = str(config.get("model") or os.getenv("V2_LESSON_AI_MODEL") or os.getenv("LESSON_AI_MODEL") or "deepseek-ai/DeepSeek-V4-Flash").strip()
-        return RemoteLessonAI(
-            reflection_prompt=str(lesson.get("aiStudentPrompt") or ""),
-            endpoint=endpoint or None,
-            api_key=api_key or None,
-            model=model or None,
-        )
-
-    @staticmethod
-    def _lesson_context(lesson: dict[str, Any]) -> str:
-        return (
-            f"当前课文：{lesson.get('title', '')}\n"
-            f"学习目标：{'；'.join(str(item) for item in lesson.get('goals', []) if item)}\n"
-            f"学习重点：{lesson.get('keyPoints', '')}\n"
-            f"学习难点：{lesson.get('difficultPoints', '')}\n"
-            f"核心问题：{lesson.get('aiStudentPrompt', '')}"
-        )
-
-    @staticmethod
-    def _build_follow_up(student_text: str) -> str:
-        if not student_text.strip():
-            return "请先用一句话表明你的立场，再补充一个生活中的例子。"
-        if _contains_any(student_text, ("两种", "辩证", "既", "也", "一方面", "另一方面")):
-            return "如果环境会影响人，而人也能作选择，你认为哪一步更关键？"
-        if _contains_any(student_text, ("环境", "影响", "近墨者黑", "很难")):
-            return "当环境确实会影响人时，一个人可以靠哪些具体做法减少负面影响？"
-        return "请把你的观点和课文中的一句话连起来，再说明这句话为什么能支持你的看法。"
-
 
 class DialogueRequestHandler(BaseHTTPRequestHandler):
     server_version = "LessonTemplateV2/2.0"
@@ -178,7 +59,6 @@ class DialogueRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        payload = self._read_json()
         logger.info("POST %s", parsed.path)
 
         if parsed.path == "/api/deploy/update":
@@ -194,21 +74,6 @@ class DialogueRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
             self._send_json(result, HTTPStatus.OK if result["ok"] else HTTPStatus.INTERNAL_SERVER_ERROR)
-            return
-
-        routes = {
-            "/api/ask": self.server.engine.answer_student_question,
-            "/api/reflect": self.server.engine.respond_to_reflection,
-            "/api/follow-up": self.server.engine.respond_to_follow_up,
-            "/api/runtime/test": self.server.engine.test_runtime,
-        }
-        handler = routes.get(parsed.path)
-        if handler:
-            try:
-                self._send_json(handler(payload))
-            except Exception as exc:  # noqa: BLE001 - API boundary should return JSON.
-                logger.exception("API request failed. path=%s", parsed.path)
-                self._send_json({"error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
             return
 
         self._send_json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
@@ -302,14 +167,6 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
     run(args.host, args.port)
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
-    return any(keyword in text for keyword in keywords)
 
 
 if __name__ == "__main__":

@@ -6,8 +6,6 @@ services:
     ports:
       - "8000:8000"
     environment:
-      V2_LESSON_AI_ENDPOINT: ${V2_LESSON_AI_ENDPOINT:-}
-      V2_LESSON_AI_MODEL: ${V2_LESSON_AI_MODEL:-}
       DEPLOY_WEBHOOK_TOKEN: ${DEPLOY_WEBHOOK_TOKEN:-}
       DEPLOY_UPDATE_COMMAND: >-
         ${DEPLOY_UPDATE_COMMAND:-docker run -d --rm --name hhs-class-1-v2-updater

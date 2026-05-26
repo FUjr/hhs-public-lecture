@@ -27,6 +27,8 @@ jobs:
           python-version: "3.12"
 
       - name: Generate lesson JSON
+        # Optional build-time AI for lesson JSON generation only.
+        # Runtime AI requests are sent directly from the browser.
         env:
           V2_LESSON_AI_ENDPOINT: ${{ secrets.V2_LESSON_AI_ENDPOINT }}
           V2_LESSON_AI_MODEL: ${{ secrets.V2_LESSON_AI_MODEL }}

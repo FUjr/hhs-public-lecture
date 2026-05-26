@@ -194,7 +194,7 @@
     <form class="settings-panel" @submit.prevent="saveSettingsForm">
       <div class="panel-header">
         <h2>设置</h2>
-        <p>默认使用 SiliconFlow 兼容接口，只填写 API Key 即可启用远程 AI。</p>
+        <p>默认使用 SiliconFlow 兼容接口，只填写 API Key 即可由浏览器直连远程 AI。</p>
       </div>
       <label>
         <span>课文</span>
@@ -212,7 +212,7 @@
       </label>
       <label>
         <span>Model</span>
-        <input v-model="settingsDraft.model" placeholder="留空则使用服务端默认模型" />
+        <input v-model="settingsDraft.model" placeholder="deepseek-ai/DeepSeek-V4-Flash" />
       </label>
       <label class="check-row">
         <input v-model="settingsDraft.preferRemote" type="checkbox" />
@@ -239,8 +239,9 @@
 
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
-import { callApi, loadLesson, loadLessonIndex } from "./services/api";
+import { loadLesson, loadLessonIndex } from "./services/api";
 import { buildFallbackAnswer, buildFollowUpResponse, buildReflectionFeedback } from "./services/localAi";
+import { answerStudentQuestion, respondToFollowUp as requestFollowUp, respondToReflection as requestReflection, testRemoteAi } from "./services/remoteAi";
 import { buildSettingsImportUrl, defaultSettings, importSettingsFromUrl, loadLessonId, loadSettings, saveLessonId, saveSettings } from "./services/storage";
 import { downloadSessionMarkdown } from "./services/record";
 
@@ -278,7 +279,7 @@ onMounted(async () => {
     lessonIndex.lessons = Array.isArray(index.lessons) ? index.lessons : [];
     selectedLessonId.value = loadLessonId() || lessonIndex.lessons[0]?.id || "";
     await switchLesson(selectedLessonId.value);
-    runtimeStatus.value = settings.value.preferRemote ? "远程 AI 优先" : "课堂模式：本地";
+    runtimeStatus.value = settings.value.preferRemote ? "远程 AI 直连优先" : "课堂模式：本地";
     if (importedSettingsResult.imported) {
       showToast("AI 配置已从链接导入");
     } else if (importedSettingsResult.error) {
@@ -320,7 +321,7 @@ async function askQuestion(forceQuestion) {
     if (!shouldUseRemote(fallback.source)) {
       return fallback;
     }
-    return callApi("/api/ask", buildAiPayload({ question: cleaned, lesson: lesson.value, fallback }), signal);
+    return answerStudentQuestion({ question: cleaned, lesson: lesson.value, fallback, config: settings.value, signal });
   }, fallback);
 
   studentQuestions.value.push({
@@ -343,7 +344,7 @@ async function respondToReflection() {
     if (!settings.value.preferRemote) {
       return fallback;
     }
-    return callApi("/api/reflect", buildAiPayload({ response, lesson: lesson.value, fallback }), signal);
+    return requestReflection({ response, lesson: lesson.value, fallback, config: settings.value, signal });
   }, fallback);
 
   reflections.value.push({
@@ -370,12 +371,14 @@ async function respondToFollowUp() {
     if (!settings.value.preferRemote) {
       return fallback;
     }
-    return callApi("/api/follow-up", buildAiPayload({
+    return requestFollowUp({
       followUp: activeReflection.value.followUp,
       response,
       lesson: lesson.value,
       fallback,
-    }), signal);
+      config: settings.value,
+      signal,
+    });
   }, fallback);
   activeReflection.value.followUpAnswer = response;
   activeReflection.value.followUpFeedback = result.response;
@@ -387,10 +390,10 @@ async function runAiTask(detail, request, fallback) {
   runtimeStatus.value = settings.value.preferRemote ? "AI思考中..." : "课堂模式：本地";
   try {
     const result = await request();
-    runtimeStatus.value = result.usingRemote ? "AI后端已连接" : (settings.value.preferRemote ? "远程 AI 优先" : "课堂模式：本地");
+    runtimeStatus.value = result.usingRemote ? "AI直连已连接" : (settings.value.preferRemote ? "远程 AI 直连优先" : "课堂模式：本地");
     return result;
   } catch (error) {
-    runtimeStatus.value = "AI后端请求错误";
+    runtimeStatus.value = "AI直连请求错误";
     showToast(`${detail}失败，已使用本地模板`);
     return fallback;
   } finally {
@@ -407,26 +410,15 @@ async function testConnection() {
   }
   busy.value = true;
   try {
-    const result = await callApi("/api/runtime/test", buildAiPayload({ lesson: lesson.value }, config));
-    runtimeStatus.value = result.usingRemote ? "AI后端已连接" : "AI后端请求错误";
-    showToast(result.usingRemote ? "AI后端已连接" : "AI后端不可用");
+    const result = await testRemoteAi(config);
+    runtimeStatus.value = result.usingRemote ? "AI直连已连接" : "AI直连请求错误";
+    showToast(result.usingRemote ? "AI直连已连接" : "AI直连不可用");
   } catch {
-    runtimeStatus.value = "AI后端请求错误";
-    showToast("AI后端连接失败");
+    runtimeStatus.value = "AI直连请求错误";
+    showToast("AI直连失败，请检查接口配置、网络或跨域限制");
   } finally {
     busy.value = false;
   }
-}
-
-function buildAiPayload(payload, config = settings.value) {
-  return {
-    ...payload,
-    clientConfig: {
-      endpoint: config.endpoint,
-      apiKey: config.apiKey,
-      model: config.model,
-    },
-  };
 }
 
 function shouldUseRemote(source) {
@@ -447,7 +439,7 @@ function saveSettingsForm() {
   saveSettings(settings.value);
   exportedSettingsUrl.value = "";
   settingsOpen.value = false;
-  runtimeStatus.value = settings.value.preferRemote ? "远程 AI 优先" : "课堂模式：本地";
+  runtimeStatus.value = settings.value.preferRemote ? "远程 AI 直连优先" : "课堂模式：本地";
   showToast("设置已保存");
 }
 
