@@ -75,6 +75,46 @@ button:disabled {
   font-size: 16px;
 }
 
+.topbar-controls {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.mode-toggle {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(92px, 1fr));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.mode-toggle.wide {
+  width: 100%;
+}
+
+.mode-toggle button {
+  min-height: 36px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  padding: 0 12px;
+  background: #fff;
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.mode-toggle button:last-child {
+  border-right: 0;
+}
+
+.mode-toggle button.active {
+  background: var(--green);
+  color: #fff;
+}
+
 .status-pill {
   min-height: 38px;
   border: 1px solid var(--line);
@@ -345,6 +385,21 @@ button:disabled {
   font-weight: 800;
 }
 
+.message-actions,
+.box-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.box-toolbar {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .message-body {
   padding: 14px 15px 16px;
   font-size: 18px;
@@ -405,7 +460,8 @@ select:focus,
 }
 
 .action-button,
-.ghost-button {
+.ghost-button,
+.danger-button {
   min-height: 48px;
   border-radius: 8px;
   padding: 0 18px;
@@ -423,6 +479,29 @@ select:focus,
   border: 1px solid var(--line);
   background: #fff;
   color: var(--green);
+}
+
+.danger-button {
+  border: 1px solid rgba(201, 95, 66, 0.45);
+  background: rgba(201, 95, 66, 0.1);
+  color: var(--coral);
+}
+
+.inline-button {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 8px;
+  background: #fff;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.inline-button.danger {
+  border-color: rgba(201, 95, 66, 0.45);
+  color: var(--coral);
 }
 
 .prompt-block {
@@ -576,6 +655,22 @@ select:focus,
   font-weight: 800;
 }
 
+.settings-mode-block {
+  display: grid;
+  gap: 8px;
+  padding: 0 18px;
+  color: var(--green);
+  font-weight: 800;
+}
+
+.settings-mode-block p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
 .settings-panel input,
 .settings-panel select {
   min-height: 44px;
@@ -677,6 +772,13 @@ select:focus,
 
   .tabs {
     width: 100%;
+  }
+
+  .topbar-controls,
+  .status-pill,
+  .mode-toggle {
+    width: 100%;
+    justify-items: stretch;
   }
 
   .tab {

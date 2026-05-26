@@ -5,9 +5,23 @@
         <h1>{{ lesson.title || "课堂模板平台" }}</h1>
         <p>{{ lesson.subtitle || "对话 AI 课堂互动" }}</p>
       </div>
-      <button class="status-pill" :class="{ loading: busy }" type="button" @click="testConnection">
-        {{ busy ? "AI思考中..." : runtimeStatus }}
-      </button>
+      <div class="topbar-controls">
+        <div class="mode-toggle" aria-label="AI 模式">
+          <button
+            v-for="mode in aiModes"
+            :key="mode.key"
+            type="button"
+            :class="{ active: settings.aiMode === mode.key }"
+            :disabled="busy"
+            @click="setAiMode(mode.key)"
+          >
+            {{ mode.label }}
+          </button>
+        </div>
+        <button class="status-pill" :class="{ loading: busy }" type="button" :disabled="busy && !isRunningTask('connection')" @click="testConnection">
+          {{ busy ? activeTaskLabel : runtimeStatus }}
+        </button>
+      </div>
       <nav class="tabs" aria-label="课堂环节">
         <button
           v-for="tab in tabs"
@@ -106,7 +120,26 @@
               <article class="message answer">
                 <div class="message-label">
                   <span>AI 回答</span>
-                  <span class="source-tag">{{ sourceLabel(item.source) }}</span>
+                  <span class="message-actions">
+                    <span class="source-tag">{{ sourceLabel(item.source) }}</span>
+                    <button
+                      v-if="isRunningTask('ask-regen', index)"
+                      class="inline-button danger"
+                      type="button"
+                      @click="cancelActiveTask"
+                    >
+                      终止
+                    </button>
+                    <button
+                      v-else
+                      class="inline-button"
+                      type="button"
+                      :disabled="busy"
+                      @click="regenerateQuestion(index)"
+                    >
+                      重新生成
+                    </button>
+                  </span>
                 </div>
                 <div class="message-body">{{ item.answer }}</div>
               </article>
@@ -117,10 +150,12 @@
               v-model="questionInput"
               class="question-input"
               :placeholder="lesson.questionPlaceholder"
+              :disabled="isQuestionBusy"
               @keydown.enter.prevent="askQuestion()"
             />
             <button class="action-button" type="button" :disabled="busy" @click="askQuestion()">提交问题</button>
-            <button class="ghost-button" type="button" @click="saveRecord">保存记录</button>
+            <button v-if="isRunningTask('ask-new')" class="danger-button" type="button" @click="cancelActiveTask">终止</button>
+            <button v-else class="ghost-button" type="button" :disabled="busy" @click="saveRecord">保存记录</button>
           </div>
         </section>
       </div>
@@ -143,7 +178,7 @@
             </div>
           </div>
           <div class="reflection-editor">
-            <textarea v-model="reflectionInput" placeholder="输入学生代表观点或小组讨论后的观点"></textarea>
+            <textarea v-model="reflectionInput" :disabled="busy" placeholder="输入学生代表观点或小组讨论后的观点"></textarea>
             <div class="reflection-hints" aria-label="思考提示">
               <div v-for="hint in lesson.reflectionHints" :key="hint.title" class="hint-card">
                 <strong>{{ hint.title }}</strong>{{ hint.description }}
@@ -151,6 +186,7 @@
             </div>
             <div class="button-row">
               <button class="action-button" type="button" :disabled="busy" @click="respondToReflection">生成点评</button>
+              <button v-if="isRunningTask('reflect-new')" class="danger-button" type="button" @click="cancelActiveTask">终止</button>
             </div>
           </div>
         </section>
@@ -167,17 +203,60 @@
                 <strong>等待学生观点</strong>
               </div>
               <template v-else>
-                <div class="feedback-box">{{ activeReflection.feedback }}</div>
+                <div class="feedback-box">
+                  <div class="box-toolbar">
+                    <span>AI 点评</span>
+                    <button
+                      v-if="isRunningTask('reflect-regen', reflections.length - 1)"
+                      class="inline-button danger"
+                      type="button"
+                      @click="cancelActiveTask"
+                    >
+                      终止
+                    </button>
+                    <button
+                      v-else
+                      class="inline-button"
+                      type="button"
+                      :disabled="busy"
+                      @click="regenerateReflection(reflections.length - 1)"
+                    >
+                      重新生成
+                    </button>
+                  </div>
+                  <div>{{ activeReflection.feedback }}</div>
+                </div>
                 <div class="follow-box">追问：{{ activeReflection.followUp }}</div>
                 <div v-if="activeReflection.followUpFeedback" class="follow-response-box">
+                  <div class="box-toolbar">
+                    <span>二次回应</span>
+                    <button
+                      v-if="isRunningTask('follow-up-regen', reflections.length - 1)"
+                      class="inline-button danger"
+                      type="button"
+                      @click="cancelActiveTask"
+                    >
+                      终止
+                    </button>
+                    <button
+                      v-else
+                      class="inline-button"
+                      type="button"
+                      :disabled="busy"
+                      @click="regenerateFollowUp(reflections.length - 1)"
+                    >
+                      重新生成
+                    </button>
+                  </div>
                   学生回应：{{ activeReflection.followUpAnswer }}
 
                   AI 二次回应：{{ activeReflection.followUpFeedback }}
                 </div>
                 <div v-else class="follow-up-composer">
-                  <textarea v-model="followUpInput" placeholder="学生继续回答 AI 的追问"></textarea>
+                  <textarea v-model="followUpInput" :disabled="isFollowUpBusy" placeholder="学生继续回答 AI 的追问"></textarea>
                   <div class="button-row">
                     <button class="action-button" type="button" :disabled="busy" @click="respondToFollowUp">回应追问</button>
+                    <button v-if="isRunningTask('follow-up-new')" class="danger-button" type="button" @click="cancelActiveTask">终止</button>
                   </div>
                 </div>
               </template>
@@ -188,13 +267,28 @@
     </section>
   </main>
 
-  <button class="settings-button" type="button" title="设置" @click="settingsOpen = true">⚙</button>
+  <button class="settings-button" type="button" title="设置" @click="openSettings">⚙</button>
 
   <section v-if="settingsOpen" class="settings-backdrop" @click.self="settingsOpen = false">
     <form class="settings-panel" @submit.prevent="saveSettingsForm">
       <div class="panel-header">
         <h2>设置</h2>
-        <p>默认使用 SiliconFlow 兼容接口，只填写 API Key 即可由浏览器直连远程 AI。</p>
+        <p>本地模式使用课堂模板生成模拟回答；大语言模型模式由浏览器直连 AI API。</p>
+      </div>
+      <div class="settings-mode-block">
+        <span>AI 模式</span>
+        <div class="mode-toggle wide" aria-label="设置 AI 模式">
+          <button
+            v-for="mode in aiModes"
+            :key="mode.key"
+            type="button"
+            :class="{ active: settingsDraft.aiMode === mode.key }"
+            @click="settingsDraft.aiMode = mode.key"
+          >
+            {{ mode.label }}
+          </button>
+        </div>
+        <p>{{ modeHelpText(settingsDraft.aiMode) }}</p>
       </div>
       <label>
         <span>课文</span>
@@ -213,10 +307,6 @@
       <label>
         <span>Model</span>
         <input v-model="settingsDraft.model" placeholder="deepseek-ai/DeepSeek-V4-Flash" />
-      </label>
-      <label class="check-row">
-        <input v-model="settingsDraft.preferRemote" type="checkbox" />
-        <span>优先使用远程 AI</span>
       </label>
       <div class="export-config-box">
         <div>
@@ -242,13 +332,17 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { loadLesson, loadLessonIndex } from "./services/api";
 import { buildFallbackAnswer, buildFollowUpResponse, buildReflectionFeedback } from "./services/localAi";
 import { answerStudentQuestion, respondToFollowUp as requestFollowUp, respondToReflection as requestReflection, testRemoteAi } from "./services/remoteAi";
-import { buildSettingsImportUrl, defaultSettings, importSettingsFromUrl, loadLessonId, loadSettings, saveLessonId, saveSettings } from "./services/storage";
+import { buildSettingsImportUrl, defaultSettings, importSettingsFromUrl, loadLessonId, saveLessonId, saveSettings } from "./services/storage";
 import { downloadSessionMarkdown } from "./services/record";
 
 const tabs = [
   { key: "overview", label: "课堂脉络" },
   { key: "ask", label: "学生问 AI" },
   { key: "reflect", label: "AI 问学生" },
+];
+const aiModes = [
+  { key: "local", label: "本地模式" },
+  { key: "llm", label: "大语言模型模式" },
 ];
 
 const activeTab = ref("overview");
@@ -261,7 +355,6 @@ const settingsDraft = reactive({ ...settings.value });
 const settingsOpen = ref(false);
 const runtimeStatus = ref("课堂模式：本地");
 const loadError = ref("");
-const busy = ref(false);
 const toastText = ref("");
 const exportedSettingsUrl = ref("");
 const questionInput = ref("");
@@ -270,8 +363,13 @@ const followUpInput = ref("");
 const studentQuestions = ref([]);
 const reflections = ref([]);
 const chatStream = ref(null);
+const activeTask = ref(null);
 
 const activeReflection = computed(() => reflections.value[reflections.value.length - 1] || null);
+const busy = computed(() => Boolean(activeTask.value));
+const activeTaskLabel = computed(() => activeTask.value?.label || "AI思考中...");
+const isQuestionBusy = computed(() => isRunningTask("ask-new") || Boolean(activeTask.value?.type === "ask-regen"));
+const isFollowUpBusy = computed(() => isRunningTask("follow-up-new") || Boolean(activeTask.value?.type === "follow-up-regen"));
 
 onMounted(async () => {
   try {
@@ -279,12 +377,12 @@ onMounted(async () => {
     lessonIndex.lessons = Array.isArray(index.lessons) ? index.lessons : [];
     selectedLessonId.value = loadLessonId() || lessonIndex.lessons[0]?.id || "";
     await switchLesson(selectedLessonId.value);
-    runtimeStatus.value = settings.value.preferRemote ? "远程 AI 直连优先" : "课堂模式：本地";
     if (importedSettingsResult.imported) {
       showToast("AI 配置已从链接导入");
     } else if (importedSettingsResult.error) {
       showToast(importedSettingsResult.error);
     }
+    await initializeAiMode();
   } catch (error) {
     loadError.value = "课文模板加载失败，请确认 public/generated-lessons/index.json 已生成。";
   }
@@ -309,7 +407,7 @@ async function switchLesson(id) {
   followUpInput.value = "";
 }
 
-async function askQuestion(forceQuestion) {
+async function askQuestion(forceQuestion, options = {}) {
   const cleaned = String(forceQuestion || questionInput.value).trim();
   if (!cleaned) {
     showToast("请先输入一个问题");
@@ -317,20 +415,32 @@ async function askQuestion(forceQuestion) {
   }
 
   const fallback = buildFallbackAnswer(cleaned, lesson.value);
-  const result = await runAiTask("正在生成课堂回答", async (signal) => {
-    if (!shouldUseRemote(fallback.source)) {
-      return fallback;
-    }
-    return answerStudentQuestion({ question: cleaned, lesson: lesson.value, fallback, config: settings.value, signal });
-  }, fallback);
+  const result = await runAiTask({
+    type: options.replaceIndex === undefined ? "ask-new" : "ask-regen",
+    targetIndex: options.replaceIndex,
+    label: options.replaceIndex === undefined ? "正在生成课堂回答..." : "正在重新生成回答...",
+    errorText: "课堂回答生成失败，已使用本地模板",
+    fallback,
+    request: (signal) => requestQuestionAnswer(cleaned, fallback, signal),
+  });
+  if (!result) {
+    return;
+  }
 
-  studentQuestions.value.push({
+  const item = {
     question: cleaned,
     answer: result.answer,
     source: result.source || fallback.source,
     matchedTitle: result.matchedTitle || fallback.matchedTitle,
-  });
-  questionInput.value = "";
+  };
+
+  if (options.replaceIndex !== undefined) {
+    studentQuestions.value.splice(options.replaceIndex, 1, item);
+  } else {
+    studentQuestions.value.push(item);
+    questionInput.value = "";
+  }
+
   await nextTick();
   if (chatStream.value) {
     chatStream.value.scrollTop = chatStream.value.scrollHeight;
@@ -339,13 +449,21 @@ async function askQuestion(forceQuestion) {
 
 async function respondToReflection() {
   const response = reflectionInput.value.trim();
+  if (!response) {
+    showToast("请先输入学生观点");
+    return;
+  }
   const fallback = buildReflectionFeedback(response, lesson.value);
-  const result = await runAiTask("正在生成点评与追问", async (signal) => {
-    if (!settings.value.preferRemote) {
-      return fallback;
-    }
-    return requestReflection({ response, lesson: lesson.value, fallback, config: settings.value, signal });
-  }, fallback);
+  const result = await runAiTask({
+    type: "reflect-new",
+    label: "正在生成点评与追问...",
+    errorText: "点评与追问生成失败，已使用本地模板",
+    fallback,
+    request: (signal) => requestReflectionFeedback(response, fallback, signal),
+  });
+  if (!result) {
+    return;
+  }
 
   reflections.value.push({
     response,
@@ -367,62 +485,214 @@ async function respondToFollowUp() {
     return;
   }
   const fallback = { response: buildFollowUpResponse(response, lesson.value) };
-  const result = await runAiTask("正在生成追问回应", async (signal) => {
-    if (!settings.value.preferRemote) {
-      return fallback;
-    }
-    return requestFollowUp({
-      followUp: activeReflection.value.followUp,
-      response,
-      lesson: lesson.value,
-      fallback,
-      config: settings.value,
-      signal,
-    });
-  }, fallback);
+  const result = await runAiTask({
+    type: "follow-up-new",
+    label: "正在生成二次回应...",
+    errorText: "二次回应生成失败，已使用本地模板",
+    fallback,
+    request: (signal) => requestFollowUpResponse(activeReflection.value.followUp, response, fallback, signal),
+  });
+  if (!result) {
+    return;
+  }
   activeReflection.value.followUpAnswer = response;
   activeReflection.value.followUpFeedback = result.response;
   followUpInput.value = "";
 }
 
-async function runAiTask(detail, request, fallback) {
-  busy.value = true;
-  runtimeStatus.value = settings.value.preferRemote ? "AI思考中..." : "课堂模式：本地";
+async function regenerateQuestion(index) {
+  const item = studentQuestions.value[index];
+  if (!item) {
+    return;
+  }
+  await askQuestion(item.question, { replaceIndex: index });
+}
+
+async function regenerateReflection(index) {
+  const item = reflections.value[index];
+  if (!item) {
+    return;
+  }
+  const fallback = buildReflectionFeedback(item.response, lesson.value);
+  const result = await runAiTask({
+    type: "reflect-regen",
+    targetIndex: index,
+    label: "正在重新生成点评...",
+    errorText: "点评重新生成失败，已使用本地模板",
+    fallback,
+    request: (signal) => requestReflectionFeedback(item.response, fallback, signal),
+  });
+  if (!result) {
+    return;
+  }
+  reflections.value.splice(index, 1, {
+    response: item.response,
+    feedback: result.feedback,
+    followUp: result.followUp || fallback.followUp,
+    followUpAnswer: "",
+    followUpFeedback: "",
+  });
+}
+
+async function regenerateFollowUp(index) {
+  const item = reflections.value[index];
+  if (!item || !item.followUpAnswer) {
+    return;
+  }
+  const fallback = { response: buildFollowUpResponse(item.followUpAnswer, lesson.value) };
+  const result = await runAiTask({
+    type: "follow-up-regen",
+    targetIndex: index,
+    label: "正在重新生成二次回应...",
+    errorText: "二次回应重新生成失败，已使用本地模板",
+    fallback,
+    request: (signal) => requestFollowUpResponse(item.followUp, item.followUpAnswer, fallback, signal),
+  });
+  if (!result) {
+    return;
+  }
+  reflections.value[index].followUpFeedback = result.response;
+}
+
+async function runAiTask({ type, targetIndex = null, label, errorText, request, fallback }) {
+  if (activeTask.value) {
+    showToast("请等待当前生成结束，或先终止本次生成");
+    return null;
+  }
+  const controller = new AbortController();
+  activeTask.value = { type, targetIndex, label, controller };
+  runtimeStatus.value = settings.value.aiMode === "llm" ? "大语言模型正在生成..." : "本地模式：使用课堂模板";
   try {
-    const result = await request();
-    runtimeStatus.value = result.usingRemote ? "AI直连已连接" : (settings.value.preferRemote ? "远程 AI 直连优先" : "课堂模式：本地");
+    const result = await request(controller.signal);
+    runtimeStatus.value = result.usingRemote ? "大语言模型可用" : "本地模式：使用课堂模板";
     return result;
   } catch (error) {
-    runtimeStatus.value = "AI直连请求错误";
-    showToast(`${detail}失败，已使用本地模板`);
+    if (error.name === "AbortError") {
+      runtimeStatus.value = modeStatusText(settings.value.aiMode);
+      showToast("已终止本次生成");
+      return null;
+    }
+    runtimeStatus.value = "大语言模型请求失败";
+    showToast(errorText);
     return fallback;
   } finally {
-    busy.value = false;
+    activeTask.value = null;
   }
 }
 
 async function testConnection() {
   const config = settingsOpen.value ? { ...settingsDraft } : settings.value;
+  if (activeTask.value) {
+    showToast("请等待当前生成结束，或先终止本次生成");
+    return false;
+  }
   if (!config.endpoint || !config.apiKey) {
     showToast("请先填写 API Key");
-    runtimeStatus.value = "课堂模式：本地";
-    return;
+    runtimeStatus.value = modeStatusText(settings.value.aiMode);
+    return false;
   }
-  busy.value = true;
+  const controller = new AbortController();
+  activeTask.value = { type: "connection", targetIndex: null, label: "正在测试 API...", controller };
   try {
-    const result = await testRemoteAi(config);
-    runtimeStatus.value = result.usingRemote ? "AI直连已连接" : "AI直连请求错误";
-    showToast(result.usingRemote ? "AI直连已连接" : "AI直连不可用");
-  } catch {
-    runtimeStatus.value = "AI直连请求错误";
-    showToast("AI直连失败，请检查接口配置、网络或跨域限制");
+    const result = await testRemoteAi(config, controller.signal);
+    runtimeStatus.value = result.usingRemote ? "大语言模型可用" : "大语言模型不可用";
+    showToast(result.usingRemote ? "大语言模型可用" : "大语言模型不可用");
+    return result.usingRemote;
+  } catch (error) {
+    runtimeStatus.value = "大语言模型不可用";
+    if (error.name !== "AbortError") {
+      showToast("API 不可用，请检查接口配置、网络或跨域限制");
+    }
+    return false;
   } finally {
-    busy.value = false;
+    activeTask.value = null;
   }
 }
 
-function shouldUseRemote(source) {
-  return settings.value.preferRemote && source !== "preset";
+function requestQuestionAnswer(question, fallback, signal) {
+  if (!shouldUseLlm(fallback.source)) {
+    return fallback;
+  }
+  return answerStudentQuestion({ question, lesson: lesson.value, fallback, config: settings.value, signal });
+}
+
+function requestReflectionFeedback(response, fallback, signal) {
+  if (settings.value.aiMode !== "llm") {
+    return fallback;
+  }
+  return requestReflection({ response, lesson: lesson.value, fallback, config: settings.value, signal });
+}
+
+function requestFollowUpResponse(followUp, response, fallback, signal) {
+  if (settings.value.aiMode !== "llm") {
+    return fallback;
+  }
+  return requestFollowUp({
+    followUp,
+    response,
+    lesson: lesson.value,
+    fallback,
+    config: settings.value,
+    signal,
+  });
+}
+
+function shouldUseLlm(source) {
+  return settings.value.aiMode === "llm";
+}
+
+async function initializeAiMode() {
+  runtimeStatus.value = modeStatusText(settings.value.aiMode);
+  if (settings.value.aiMode !== "llm") {
+    return;
+  }
+  const ok = await testConnection();
+  if (!ok) {
+    settings.value = { ...settings.value, aiMode: "local" };
+    Object.assign(settingsDraft, settings.value);
+    saveSettings(settings.value);
+    runtimeStatus.value = modeStatusText("local");
+    showToast("API 不可用，已切换为本地模式");
+  }
+}
+
+async function setAiMode(mode) {
+  if (activeTask.value) {
+    showToast("请等待当前生成结束，或先终止本次生成");
+    return;
+  }
+  settings.value = { ...settings.value, aiMode: mode };
+  Object.assign(settingsDraft, settings.value);
+  saveSettings(settings.value);
+  runtimeStatus.value = modeStatusText(mode);
+  showToast(mode === "llm" ? "已切换为大语言模型模式" : "已切换为本地模式");
+  if (mode === "llm") {
+    const ok = await testConnection();
+    if (!ok) {
+      settings.value = { ...settings.value, aiMode: "local" };
+      Object.assign(settingsDraft, settings.value);
+      saveSettings(settings.value);
+      runtimeStatus.value = modeStatusText("local");
+      showToast("API 不可用，已切换为本地模式");
+    }
+  }
+}
+
+function cancelActiveTask() {
+  activeTask.value?.controller?.abort();
+}
+
+function isRunningTask(type, targetIndex = undefined) {
+  if (!activeTask.value || activeTask.value.type !== type) {
+    return false;
+  }
+  return targetIndex === undefined || activeTask.value.targetIndex === targetIndex;
+}
+
+function openSettings() {
+  Object.assign(settingsDraft, settings.value);
+  exportedSettingsUrl.value = "";
+  settingsOpen.value = true;
 }
 
 function saveRecord() {
@@ -434,13 +704,23 @@ function saveRecord() {
   showToast("课堂记录已下载");
 }
 
-function saveSettingsForm() {
+async function saveSettingsForm() {
   settings.value = { ...settingsDraft };
   saveSettings(settings.value);
   exportedSettingsUrl.value = "";
   settingsOpen.value = false;
-  runtimeStatus.value = settings.value.preferRemote ? "远程 AI 直连优先" : "课堂模式：本地";
+  runtimeStatus.value = modeStatusText(settings.value.aiMode);
   showToast("设置已保存");
+  if (settings.value.aiMode === "llm") {
+    const ok = await testConnection();
+    if (!ok) {
+      settings.value = { ...settings.value, aiMode: "local" };
+      Object.assign(settingsDraft, settings.value);
+      saveSettings(settings.value);
+      runtimeStatus.value = modeStatusText("local");
+      showToast("API 不可用，已切换为本地模式");
+    }
+  }
 }
 
 function resetSettingsForm() {
@@ -472,9 +752,17 @@ function sourceLabel(source) {
     return "预设回答";
   }
   if (source === "generated") {
-    return "远程生成";
+    return "大语言模型";
   }
-  return "本地模板";
+  return "本地模式";
+}
+
+function modeStatusText(mode) {
+  return mode === "llm" ? "大语言模型模式：浏览器直连 AI API" : "本地模式：使用课堂模板";
+}
+
+function modeHelpText(mode) {
+  return mode === "llm" ? "使用真实 AI。每次打开页面会自动测试 API，可用后再进入课堂生成。" : "使用本地假 AI 模板，不请求网络，适合无 API 或网络不稳定时上课。";
 }
 
 function normalizeLesson(raw) {

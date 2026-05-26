@@ -47,7 +47,7 @@ export function defaultSettings() {
     endpoint: "https://api.siliconflow.cn/v1/chat/completions",
     apiKey: "",
     model: "deepseek-ai/DeepSeek-V4-Flash",
-    preferRemote: true,
+    aiMode: "local",
   };
 }
 
@@ -79,12 +79,14 @@ function decodeSettings(encoded) {
 
 function normalizeSettings(source = {}) {
   const defaults = defaultSettings();
+  const legacyMode = source.preferRemote === true ? "llm" : "local";
+  const aiMode = source.aiMode === "llm" || source.aiMode === "local" ? source.aiMode : legacyMode;
   return {
     ...defaults,
     endpoint: typeof source.endpoint === "string" && source.endpoint ? source.endpoint : defaults.endpoint,
     apiKey: typeof source.apiKey === "string" ? source.apiKey : "",
     model: typeof source.model === "string" && source.model ? source.model : defaults.model,
-    preferRemote: typeof source.preferRemote === "boolean" ? source.preferRemote : defaults.preferRemote,
+    aiMode,
   };
 }
 

@@ -11,8 +11,8 @@
 1. 打开页面后，左下角点击设置按钮。
 2. 在“课文”中选择本节课模板。
 3. 默认已内置 SiliconFlow API Endpoint 和模型 `deepseek-ai/DeepSeek-V4-Flash`，只需要填写 API Key。
-4. 保持“优先使用远程 AI”勾选，点击“保存”。
-5. 点击顶部状态按钮或设置里的“测试连接”，看到“AI直连已连接”即可使用。
+4. 在页面顶部或设置页选择“本地模式”或“大语言模型模式”，浏览器会记住上一次选择。
+5. 选择“大语言模型模式”后点击“保存”或“测试连接”，看到“大语言模型可用”即可使用；如果 API 不可用，系统会提示并切回本地模式。
 6. 在“学生问 AI”中输入学生问题，点击提交问题。
 7. 在“AI 问学生”中输入学生观点，生成点评后可继续输入学生对追问的回应。
 8. 课堂结束后，在“学生问 AI”页面点击“保存记录”，下载本节课 Markdown 记录。
@@ -77,7 +77,7 @@ python scripts/generate_lessons.py
 - 默认 API endpoint：`https://api.siliconflow.cn/v1/chat/completions`。
 - 默认模型：`deepseek-ai/DeepSeek-V4-Flash`。
 - 教师通常只需要填写 SiliconFlow API Key。
-- 选择是否优先使用远程 AI。
+- 切换“本地模式”和“大语言模型模式”。
 - 导出一个可自动导入的 AI 配置链接。
 
 这些设置只保存在当前浏览器 `localStorage`。AI 请求由浏览器直接发往设置中的 Endpoint，不会写入仓库、镜像或服务端文件。导出的配置链接会包含 API Key，请谨慎分享。
