@@ -1,18 +1,18 @@
 {
   "lessons": [
     {
-      "id": "sun-quan-quan-xue",
-      "title": "《孙权劝学》导学案",
-      "subtitle": "课堂对话 AI"
-    },
-    {
-      "id": "44CK5biI6K-044CL",
-      "title": "《师说》",
+      "id": "44ck5bii6k-044cl",
+      "title": "《师说》导学案",
       "subtitle": "课堂对话 AI"
     },
     {
       "id": "ai_lian_shuo",
       "title": "《爱莲说》导学案",
+      "subtitle": "课堂对话 AI"
+    },
+    {
+      "id": "sun-quan-quan-xue",
+      "title": "《孙权劝学》导学案",
       "subtitle": "课堂对话 AI"
     }
   ]
