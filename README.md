@@ -6,6 +6,8 @@
 
 平台内置课堂脉络、学习目标、提问提示、思考步骤和课堂记录下载。AI 不可用时会自动回到本地模板，保证课堂流程不中断；配置远程 AI 后，回答会优先由浏览器直接请求 AI API 生成。
 
+备课模式支持教师输入课文原文和简要思路生成导学案模板，也支持粘贴已有导学案并解析为可编辑模板。保存后会通过服务端 Python 使用 SSH 推送到 `lesson-drafts` 草稿分支，不触发现有部署 webhook。
+
 ## 教师使用说明
 
 1. 打开页面后，左下角点击设置按钮。
@@ -87,6 +89,22 @@ python scripts/generate_lessons.py
 运行时 AI 配置只从前端设置读取。未修改前端设置时，浏览器默认使用 SiliconFlow 兼容接口和 `deepseek-ai/DeepSeek-V4-Flash` 模型，只需补充 API Key。
 
 如果目标 AI 服务没有开放浏览器跨域请求，直连会失败并回退本地模板；此时再考虑补充服务端转发接口。
+
+## 备课模式
+
+备课模式需要服务端配置：
+
+- `PREP_MODE_TOKEN`
+- `PREP_GIT_REPO`
+- `PREP_GIT_BRANCH`，默认 `lesson-drafts`
+- `PREP_GIT_SSH_PRIVATE_KEY`
+- `PREP_GIT_USER_NAME`
+- `PREP_GIT_USER_EMAIL`
+- `PREP_AI_ENDPOINT`
+- `PREP_AI_API_KEY`
+- `PREP_AI_MODEL`
+
+前端会把备课 Token 保存在浏览器 `localStorage`。备课保存会同时提交 `lesson_plan/*.md` 和 `public/generated-lessons/*.json`，并更新 `public/generated-lessons/index.json`。保存成功后当前浏览器会立即加载返回的模板用于预览，正式发布仍取决于后续合并或发布流程。
 
 ## Docker
 

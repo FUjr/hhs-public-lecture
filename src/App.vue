@@ -256,6 +256,131 @@
         </section>
       </div>
     </section>
+
+    <section v-else-if="activeTab === 'prep'" class="view active">
+      <div class="prep-grid">
+        <aside class="panel prep-sidebar">
+          <div class="panel-header">
+            <h2>备课模式</h2>
+            <p>生成、粘贴或编辑导学案模板，保存后推送到 lesson-drafts 分支。</p>
+          </div>
+          <label>
+            <span>备课 Token</span>
+            <input v-model="prepToken" type="password" placeholder="请输入备课 token" @change="persistPrepToken" />
+          </label>
+          <div class="prep-actions">
+            <button class="ghost-button" type="button" :disabled="prepBusy" @click="verifyPrepToken">校验 Token</button>
+            <button class="ghost-button" type="button" :disabled="prepBusy" @click="loadTemplatesForPrep">加载现有模板</button>
+          </div>
+          <div class="prep-mode-tabs">
+            <button
+              v-for="mode in prepModes"
+              :key="mode.key"
+              type="button"
+              :class="{ active: prepMode === mode.key }"
+              @click="prepMode = mode.key"
+            >
+              {{ mode.label }}
+            </button>
+          </div>
+          <label v-if="prepTemplates.length">
+            <span>现有模板</span>
+            <select v-model="selectedPrepTemplateId" @change="selectPrepTemplate">
+              <option value="">选择要编辑的模板</option>
+              <option v-for="item in prepTemplates" :key="item.id" :value="item.id">{{ item.lesson.title }}</option>
+            </select>
+          </label>
+        </aside>
+
+        <section class="panel prep-main">
+          <div class="panel-header">
+            <h2>{{ prepModeTitle }}</h2>
+            <p>{{ prepStatus }}</p>
+          </div>
+
+          <div v-if="prepMode === 'generate'" class="prep-editor">
+            <label>
+              <span>课题</span>
+              <input v-model="prepGenerate.title" placeholder="例如：陋室铭" />
+            </label>
+            <label>
+              <span>课文原文</span>
+              <textarea v-model="prepGenerate.sourceText" placeholder="粘贴课文原文"></textarea>
+            </label>
+            <label>
+              <span>简要思路</span>
+              <textarea v-model="prepGenerate.brief" placeholder="写下本节课的教学设想、重点和活动思路"></textarea>
+            </label>
+            <div class="button-row">
+              <button class="action-button" type="button" :disabled="prepBusy" @click="generatePrep">生成导学案模板</button>
+            </div>
+          </div>
+
+          <div v-else-if="prepMode === 'paste'" class="prep-editor">
+            <label>
+              <span>导学案 Markdown</span>
+              <textarea v-model="prepMarkdown" placeholder="粘贴完整导学案 Markdown"></textarea>
+            </label>
+            <div class="button-row">
+              <button class="action-button" type="button" :disabled="prepBusy" @click="parsePrep">解析导学案</button>
+            </div>
+          </div>
+
+          <div v-else class="prep-editor">
+            <div class="prep-form-grid">
+              <label>
+                <span>模板 ID</span>
+                <input v-model="prepLesson.id" placeholder="自动生成或手动填写英文 ID" />
+              </label>
+              <label>
+                <span>标题</span>
+                <input v-model="prepLesson.title" placeholder="课文标题" />
+              </label>
+              <label>
+                <span>副标题</span>
+                <input v-model="prepLesson.subtitle" placeholder="课堂对话 AI" />
+              </label>
+              <label>
+                <span>学生提问提示</span>
+                <input v-model="prepLesson.questionPrompt" placeholder="学生问 AI 环节提示" />
+              </label>
+              <label>
+                <span>学习重点</span>
+                <input v-model="prepLesson.keyPoints" placeholder="本课学习重点" />
+              </label>
+              <label>
+                <span>学习难点</span>
+                <input v-model="prepLesson.difficultPoints" placeholder="本课学习难点" />
+              </label>
+            </div>
+            <label>
+              <span>AI 提问</span>
+              <textarea v-model="prepLesson.aiStudentPrompt" placeholder="AI 问学生的问题"></textarea>
+            </label>
+            <label>
+              <span>学习目标（每行一条）</span>
+              <textarea v-model="prepTextFields.goals" placeholder="每行一条学习目标"></textarea>
+            </label>
+            <label>
+              <span>问题提示（每行一条）</span>
+              <textarea v-model="prepTextFields.questionCues" placeholder="每行一条学生提问提示"></textarea>
+            </label>
+            <label>
+              <span>预设问答 JSON</span>
+              <textarea v-model="prepTextFields.presetsJson" placeholder="数组 JSON：[{ title, category, question, keywords, answer }]"></textarea>
+            </label>
+            <label>
+              <span>导学案 Markdown</span>
+              <textarea v-model="prepMarkdown" placeholder="导学案 Markdown 会随保存一起提交"></textarea>
+            </label>
+            <div class="button-row">
+              <button class="ghost-button" type="button" :disabled="prepBusy" @click="syncPrepFieldsSafely">同步表单</button>
+              <button class="action-button" type="button" :disabled="prepBusy" @click="savePrep">保存并推送草稿分支</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
   </main>
 
   <button class="settings-button" type="button" title="设置" @click="openSettings">⚙</button>
@@ -314,14 +439,21 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { loadLesson, loadLessonIndex } from "./services/api";
 import { buildFallbackAnswer, buildFollowUpResponse, buildReflectionFeedback } from "./services/localAi";
+import { generatePrepLesson, loadPrepTemplates, parsePrepMarkdown, savePrepLesson, validatePrepToken } from "./services/prepApi";
 import { answerStudentQuestion, respondToFollowUp as requestFollowUp, respondToReflection as requestReflection, testRemoteAi } from "./services/remoteAi";
-import { buildSettingsImportUrl, defaultSettings, importSettingsFromUrl, loadLessonId, saveLessonId, saveSettings } from "./services/storage";
+import { buildSettingsImportUrl, defaultSettings, importSettingsFromUrl, loadLessonId, loadPrepToken, saveLessonId, savePrepToken, saveSettings } from "./services/storage";
 import { downloadSessionMarkdown } from "./services/record";
 
 const tabs = [
   { key: "overview", label: "课堂脉络" },
   { key: "ask", label: "学生问 AI" },
   { key: "reflect", label: "AI 问学生" },
+  { key: "prep", label: "备课模式" },
+];
+const prepModes = [
+  { key: "generate", label: "生成导学案" },
+  { key: "paste", label: "粘贴导学案" },
+  { key: "edit", label: "编辑模板" },
 ];
 
 const activeTab = ref("overview");
@@ -343,12 +475,24 @@ const studentQuestions = ref([]);
 const reflections = ref([]);
 const chatStream = ref(null);
 const activeTask = ref(null);
+const prepToken = ref(loadPrepToken());
+const prepMode = ref("generate");
+const prepBusy = ref(false);
+const prepStatus = ref("请输入备课 token 后开始。");
+const prepGenerate = reactive({ title: "", sourceText: "", brief: "" });
+const prepMarkdown = ref("");
+const prepLesson = reactive(normalizeLesson({}));
+const prepTextFields = reactive({ goals: "", questionCues: "", presetsJson: "[]" });
+const prepTemplates = ref([]);
+const selectedPrepTemplateId = ref("");
+const localPreviewLessons = reactive({});
 
 const activeReflection = computed(() => reflections.value[reflections.value.length - 1] || null);
 const busy = computed(() => Boolean(activeTask.value));
 const activeTaskLabel = computed(() => activeTask.value?.label || "AI思考中...");
 const isQuestionBusy = computed(() => isRunningTask("ask-new") || Boolean(activeTask.value?.type === "ask-regen"));
 const isFollowUpBusy = computed(() => isRunningTask("follow-up-new") || Boolean(activeTask.value?.type === "follow-up-regen"));
+const prepModeTitle = computed(() => prepModes.find((item) => item.key === prepMode.value)?.label || "备课模式");
 
 onMounted(async () => {
   try {
@@ -377,7 +521,7 @@ async function switchLesson(id) {
   if (!id) {
     return;
   }
-  lesson.value = normalizeLesson(await loadLesson(id));
+  lesson.value = normalizeLesson(localPreviewLessons[id] || await loadLesson(id));
   saveLessonId(id);
   studentQuestions.value = [];
   reflections.value = [];
@@ -754,6 +898,165 @@ function modeHelpText(mode) {
 
 function nextModeButtonText(mode) {
   return mode === "llm" ? "切换到本地模式" : "切换到大语言模型模式";
+}
+
+function persistPrepToken() {
+  savePrepToken(prepToken.value);
+}
+
+async function verifyPrepToken() {
+  await runPrepTask("正在校验 token...", async () => {
+    await validatePrepToken(prepToken.value);
+    persistPrepToken();
+    prepStatus.value = "Token 校验通过。";
+    showToast("备课 Token 已通过");
+  });
+}
+
+async function loadTemplatesForPrep() {
+  await runPrepTask("正在加载现有模板...", async () => {
+    const result = await loadPrepTemplates(prepToken.value);
+    prepTemplates.value = Array.isArray(result.lessons) ? result.lessons : [];
+    prepStatus.value = `已加载 ${prepTemplates.value.length} 个模板。`;
+  });
+}
+
+async function generatePrep() {
+  await runPrepTask("正在生成导学案模板...", async () => {
+    const result = await generatePrepLesson(prepToken.value, { ...prepGenerate });
+    applyPrepResult(result);
+    prepMode.value = "edit";
+    prepStatus.value = result.generatedBy === "ai" ? "已由 AI 生成模板，请检查后保存。" : "AI 未配置或不可用，已生成结构草稿。";
+  });
+}
+
+async function parsePrep() {
+  await runPrepTask("正在解析导学案...", async () => {
+    const result = await parsePrepMarkdown(prepToken.value, { markdown: prepMarkdown.value });
+    applyPrepResult(result);
+    prepMode.value = "edit";
+    prepStatus.value = "导学案已解析为可编辑模板。";
+  });
+}
+
+async function savePrep() {
+  await runPrepTask("正在保存并推送草稿分支...", async () => {
+    syncPrepLessonFromFields();
+    const result = await savePrepLesson(prepToken.value, {
+      lesson: { ...prepLesson },
+      markdown: prepMarkdown.value,
+      commitMessage: `备课模式生成《${prepLesson.title || "新课文"}》导学案模板`,
+    });
+    applyPrepResult(result);
+    upsertPreviewLesson(result.lesson);
+    prepStatus.value = `已推送到 ${result.branch}，commit：${String(result.commit || "").slice(0, 8)}`;
+    showToast("导学案模板已保存到草稿分支");
+  });
+}
+
+function selectPrepTemplate() {
+  const item = prepTemplates.value.find((entry) => entry.id === selectedPrepTemplateId.value);
+  if (!item) {
+    return;
+  }
+  applyPrepResult({ lesson: item.lesson, markdown: item.markdown });
+  prepMode.value = "edit";
+  prepStatus.value = `正在编辑：${item.lesson.title}`;
+}
+
+async function runPrepTask(status, action) {
+  if (!prepToken.value.trim()) {
+    showToast("请先填写备课 Token");
+    prepStatus.value = "请先填写备课 Token。";
+    return;
+  }
+  prepBusy.value = true;
+  prepStatus.value = status;
+  try {
+    await action();
+  } catch (error) {
+    prepStatus.value = prepErrorText(error);
+    showToast(prepStatus.value);
+  } finally {
+    prepBusy.value = false;
+  }
+}
+
+function applyPrepResult(result) {
+  if (typeof result.markdown === "string") {
+    prepMarkdown.value = result.markdown;
+  }
+  if (result.lesson && typeof result.lesson === "object") {
+    Object.assign(prepLesson, normalizeLesson(result.lesson));
+    syncPrepFieldsFromLesson();
+  }
+}
+
+function syncPrepFieldsFromLesson() {
+  prepTextFields.goals = (prepLesson.goals || []).join("\n");
+  prepTextFields.questionCues = (prepLesson.questionCues || []).join("\n");
+  prepTextFields.presetsJson = JSON.stringify(prepLesson.presets || [], null, 2);
+}
+
+function syncPrepLessonFromFields() {
+  prepLesson.goals = linesFromText(prepTextFields.goals);
+  prepLesson.questionCues = linesFromText(prepTextFields.questionCues);
+  try {
+    const parsed = JSON.parse(prepTextFields.presetsJson || "[]");
+    prepLesson.presets = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    throw new Error("预设问答 JSON 格式不正确");
+  }
+}
+
+function syncPrepFieldsSafely() {
+  try {
+    syncPrepLessonFromFields();
+    showToast("表单内容已同步");
+  } catch (error) {
+    showToast(prepErrorText(error));
+  }
+}
+
+function upsertPreviewLesson(newLesson) {
+  if (!newLesson?.id) {
+    return;
+  }
+  const existingIndex = lessonIndex.lessons.findIndex((item) => item.id === newLesson.id);
+  const indexItem = { id: newLesson.id, title: newLesson.title, subtitle: newLesson.subtitle || "" };
+  if (existingIndex >= 0) {
+    lessonIndex.lessons.splice(existingIndex, 1, indexItem);
+  } else {
+    lessonIndex.lessons.push(indexItem);
+  }
+  localPreviewLessons[newLesson.id] = normalizeLesson(newLesson);
+  lesson.value = normalizeLesson(newLesson);
+  selectedLessonId.value = newLesson.id;
+  activeTab.value = "overview";
+}
+
+function linesFromText(text) {
+  return String(text || "").split("\n").map((line) => line.trim()).filter(Boolean);
+}
+
+function prepErrorText(error) {
+  const message = String(error?.message || error || "");
+  if (message.includes("forbidden") || message.includes("invalid_prep_token")) {
+    return "备课 Token 无效";
+  }
+  if (message.includes("markdown_required")) {
+    return "请先填写导学案 Markdown";
+  }
+  if (message.includes("source_or_brief_required")) {
+    return "请填写课文原文或简要思路";
+  }
+  if (message.includes("prep_git_repo_missing")) {
+    return "服务端未配置 PREP_GIT_REPO";
+  }
+  if (message.includes("prep_git_ssh_private_key_missing")) {
+    return "服务端未配置 PREP_GIT_SSH_PRIVATE_KEY";
+  }
+  return message || "备课操作失败";
 }
 
 function normalizeLesson(raw) {

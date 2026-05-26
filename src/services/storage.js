@@ -1,5 +1,6 @@
 const SETTINGS_KEY = "hhs-public-lecture-v2-settings";
 const LESSON_KEY = "hhs-public-lecture-v2-lesson-id";
+const PREP_TOKEN_KEY = "hhs-public-lecture-v2-prep-token";
 const AI_CONFIG_PARAM = "aiConfig";
 
 export function loadSettings() {
@@ -58,6 +59,19 @@ export function loadLessonId() {
 export function saveLessonId(id) {
   if (id) {
     localStorage.setItem(LESSON_KEY, id);
+  }
+}
+
+export function loadPrepToken() {
+  return localStorage.getItem(PREP_TOKEN_KEY) || "";
+}
+
+export function savePrepToken(token) {
+  const cleaned = String(token || "").trim();
+  if (cleaned) {
+    localStorage.setItem(PREP_TOKEN_KEY, cleaned);
+  } else {
+    localStorage.removeItem(PREP_TOKEN_KEY);
   }
 }
 

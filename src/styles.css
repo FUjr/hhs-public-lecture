@@ -165,6 +165,13 @@ button:disabled {
   grid-template-columns: minmax(360px, 0.92fr) minmax(0, 1.08fr);
 }
 
+.prep-grid {
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+  gap: 18px;
+  min-height: calc(100vh - 156px);
+}
+
 .panel {
   min-width: 0;
   border: 1px solid var(--line);
@@ -637,6 +644,87 @@ select:focus,
   font-weight: 800;
 }
 
+.prep-sidebar {
+  align-self: start;
+}
+
+.prep-sidebar label,
+.prep-editor label {
+  display: grid;
+  gap: 6px;
+  color: var(--green);
+  font-weight: 800;
+}
+
+.prep-sidebar label {
+  padding: 16px 18px 0;
+}
+
+.prep-sidebar input,
+.prep-sidebar select,
+.prep-editor input,
+.prep-editor textarea {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  outline: none;
+}
+
+.prep-sidebar input,
+.prep-sidebar select,
+.prep-editor input {
+  min-height: 44px;
+  padding: 0 12px;
+  font-weight: 400;
+}
+
+.prep-sidebar select {
+  width: calc(100% - 36px);
+  margin: 0 18px 18px;
+}
+
+.prep-actions,
+.prep-mode-tabs {
+  display: grid;
+  gap: 10px;
+  padding: 14px 18px 0;
+}
+
+.prep-mode-tabs button {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--green);
+  font-weight: 800;
+}
+
+.prep-mode-tabs button.active {
+  border-color: var(--green);
+  background: var(--green-2);
+}
+
+.prep-main {
+  min-height: 100%;
+}
+
+.prep-editor {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.prep-editor textarea {
+  min-height: 130px;
+}
+
+.prep-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .settings-mode-block {
   display: grid;
   gap: 8px;
@@ -748,7 +836,9 @@ select:focus,
   .topbar,
   .overview-grid,
   .ask-grid,
-  .reflect-grid {
+  .reflect-grid,
+  .prep-grid,
+  .prep-form-grid {
     grid-template-columns: 1fr;
   }
 
