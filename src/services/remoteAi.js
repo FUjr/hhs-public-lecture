@@ -27,13 +27,7 @@ export async function respondToReflection({ response, lesson, fallback, config, 
 }
 
 export async function respondToFollowUp({ followUp, response, lesson, config, signal }) {
-  const prompt = [
-    "你是一名七年级语文课堂助手。请根据 AI 追问和学生回应，给出 80 到 160 字的课堂式二次回应。",
-    "先接住学生观点，再推进到文本核心，不要模板腔。",
-    `课文：${lesson?.title || "当前课文"}`,
-    `追问：${followUp}`,
-    `学生回应：${response}`,
-  ].join("\n");
+  const prompt = buildFollowUpPrompt(followUp, response, lesson);
   return {
     response: await requestRemoteText(prompt, config, signal),
     usingRemote: true,
@@ -132,21 +126,24 @@ function buildAnswerPrompt(question, lesson) {
   const recentOpeners = formatRecentOpeners(answerHistory);
   const title = lesson?.title || "当前课文";
   return [
-    `你是一名七年级语文课堂助手，正在辅助《${title}》课堂互动。`,
-    "请回答学生提问，要求语言自然、像课堂即时回应，不要总是重复同一种开头或同一种结尾。",
+    `你是一名七年级下册语文课堂助手，正在辅助《${title}》课堂中的“学生问 AI”环节。`,
+    "请像教师在课堂上真实接住学生问题那样回答：自然、明确、有现场感，不要像资料卡片，不要模板腔。",
     `本次问题类型：${questionType}`,
     `本次表达风格：${styleHint}`,
     "回答要求：",
-    "1. 120到220字，先正面回答学生真正关心的问题，再顺势回到课文。",
-    "2. 不要空泛复述全文，不要把所有问题都答成同一个模板。",
-    "3. 如果是象征类问题，先解释关键意象分别代表什么。",
-    "4. 如果是态度类问题，先比较作者对不同对象的态度。",
-    "5. 如果是写法类问题，先分析对比、衬托等手法怎样服务主旨。",
-    "6. 如果是主旨类问题，先点明核心品质或核心观点为什么重要。",
-    "7. 如果涉及作者经历，要明确写成“结合背景可这样理解”。",
-    "8. 结尾要自然回扣本课核心，不要机械重复同一句话。",
+    "1. 120到220字，先正面回答学生真正问的点，再顺势回到课文依据。",
+    "2. 结合教案 JSON 和问题设计 JSON，不要脱离本节课目标、活动要求和预设问题方向。",
+    "3. 不要空泛复述全文，不要把所有问题都答成同一个模板。",
+    "4. 如果是象征类问题，先解释关键意象分别代表什么。",
+    "5. 如果是态度类问题，先比较作者对不同对象的态度。",
+    "6. 如果是写法类问题，先分析对比、衬托怎样突出主体。",
+    "7. 如果是主旨类问题，先点明核心品质或核心观点为什么重要。",
+    "8. 如果涉及作者经历，要明确写成“结合背景可这样理解”。",
+    "9. 结尾要自然回扣本课核心，不要机械重复同一句话。",
     `最近几次回答的开头请尽量避开这些说法：${recentOpeners}`,
-    `课堂背景：${lessonContext(lesson)}`,
+    `课堂简要背景：${lessonContext(lesson)}`,
+    `教案 JSON：${lessonJsonForPrompt(lesson)}`,
+    `问题设计 JSON：${questionDesignJsonForPrompt(lesson)}`,
     `学生问题：${question}`,
   ].join("\n");
 }
@@ -157,19 +154,77 @@ function buildReflectionPrompt(studentText, lesson) {
   const recentOpeners = formatRecentOpeners(feedbackHistory);
   const title = lesson?.title || "当前课文";
   return [
-    `你是一名七年级语文课堂助手，正在对学生围绕《${title}》的课堂观点作即时回应。`,
-    "请像老师在课堂上真实接话那样点评，不要模板腔，不要总重复固定说法。",
+    `你是一名七年级下册语文课堂助手，正在对学生围绕《${title}》的课堂观点作即时回应。`,
+    "请像老师在课堂上真实接话那样点评：先接住学生原话，再推进理解，不要模板腔，不要总重复固定说法。",
     `学生当前立场：${stance}`,
     `本次点评风格：${styleHint}`,
     "点评要求：",
     "1. 80到180字，先接住学生观点，再往深处推进一步。",
-    "2. 如果学生更强调环境影响，先承认环境影响真实存在，再谈人仍然可以努力作出选择。",
-    "3. 如果学生更强调主动坚守，先肯定主动坚守的价值，再提醒这种坚守并不轻松。",
-    "4. 如果学生两边都提到，就回应这种辩证看法，并帮助他把重点落到现实选择。",
-    "5. 可以适度回扣课文，但不要直接背模板，也不要每次都用同一结构。",
+    "2. 结合教案 JSON 和问题设计 JSON，围绕本节课的文本依据、表达逻辑和现实思辨推进。",
+    "3. 如果学生更强调环境影响，先承认环境影响真实存在，再谈人仍然可以努力作出选择。",
+    "4. 如果学生更强调主动坚守，先肯定主动坚守的价值，再提醒这种坚守并不轻松。",
+    "5. 如果学生两边都提到，就回应这种辩证看法，并帮助他把重点落到现实选择。",
+    "6. 可以适度回扣课文，但不要直接背模板，也不要每次都用同一结构。",
+    `教案 JSON：${lessonJsonForPrompt(lesson)}`,
+    `问题设计 JSON：${questionDesignJsonForPrompt(lesson)}`,
     `最近几次点评的开头请尽量避开这些说法：${recentOpeners}`,
     `学生观点：${studentText}`,
   ].join("\n");
+}
+
+function buildFollowUpPrompt(followUp, response, lesson) {
+  return [
+    "你是一名七年级下册语文课堂助手。请根据 AI 追问和学生回应，给出 80 到 160 字的课堂式二次回应。",
+    "语气要接近课堂即时追评：先接住学生回应，再推进到文本核心或现实选择，不要模板腔。",
+    "回应要求：",
+    "1. 不要只表扬，要帮助学生把观点说得更清楚。",
+    "2. 结合教案 JSON 和问题设计 JSON，回到本节课的核心问题。",
+    "3. 语言自然，像老师在课堂上顺势接话。",
+    `课文：${lesson?.title || "当前课文"}`,
+    `追问：${followUp}`,
+    `学生回应：${response}`,
+    `教案 JSON：${lessonJsonForPrompt(lesson)}`,
+    `问题设计 JSON：${questionDesignJsonForPrompt(lesson)}`,
+  ].join("\n");
+}
+
+function lessonJsonForPrompt(lesson = {}) {
+  return safeJsonStringify({
+    id: lesson.id,
+    title: lesson.title,
+    subtitle: lesson.subtitle,
+    goals: lesson.goals,
+    keyPoints: lesson.keyPoints,
+    difficultPoints: lesson.difficultPoints,
+    coreStatement: lesson.coreStatement,
+    aiStudentPrompt: lesson.aiStudentPrompt,
+    stages: lesson.stages,
+    summaryTemplate: lesson.summaryTemplate,
+    homeworkTemplate: lesson.homeworkTemplate,
+    lessonPlanSource: lesson.lessonPlanSource,
+  });
+}
+
+function questionDesignJsonForPrompt(lesson = {}) {
+  return safeJsonStringify({
+    askPanelTitle: lesson.askPanelTitle,
+    askPanelDescription: lesson.askPanelDescription,
+    questionPrompt: lesson.questionPrompt,
+    questionPlaceholder: lesson.questionPlaceholder,
+    questionCues: lesson.questionCues,
+    flowerCards: lesson.flowerCards,
+    thinkingSteps: lesson.thinkingSteps,
+    reflectionHints: lesson.reflectionHints,
+    presets: lesson.presets,
+  });
+}
+
+function safeJsonStringify(value) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return "{}";
+  }
 }
 
 function lessonContext(lesson = {}) {

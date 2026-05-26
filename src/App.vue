@@ -6,18 +6,9 @@
         <p>{{ lesson.subtitle || "对话 AI 课堂互动" }}</p>
       </div>
       <div class="topbar-controls">
-        <div class="mode-toggle" aria-label="AI 模式">
-          <button
-            v-for="mode in aiModes"
-            :key="mode.key"
-            type="button"
-            :class="{ active: settings.aiMode === mode.key }"
-            :disabled="busy"
-            @click="setAiMode(mode.key)"
-          >
-            {{ mode.label }}
-          </button>
-        </div>
+        <button class="mode-switch-button" type="button" :disabled="busy" @click="toggleAiMode">
+          {{ nextModeButtonText(settings.aiMode) }}
+        </button>
         <button class="status-pill" :class="{ loading: busy }" type="button" :disabled="busy && !isRunningTask('connection')" @click="testConnection">
           {{ busy ? activeTaskLabel : runtimeStatus }}
         </button>
@@ -277,17 +268,9 @@
       </div>
       <div class="settings-mode-block">
         <span>AI 模式</span>
-        <div class="mode-toggle wide" aria-label="设置 AI 模式">
-          <button
-            v-for="mode in aiModes"
-            :key="mode.key"
-            type="button"
-            :class="{ active: settingsDraft.aiMode === mode.key }"
-            @click="settingsDraft.aiMode = mode.key"
-          >
-            {{ mode.label }}
-          </button>
-        </div>
+        <button class="mode-switch-button wide" type="button" @click="settingsDraft.aiMode = nextAiMode(settingsDraft.aiMode)">
+          {{ nextModeButtonText(settingsDraft.aiMode) }}
+        </button>
         <p>{{ modeHelpText(settingsDraft.aiMode) }}</p>
       </div>
       <label>
@@ -339,10 +322,6 @@ const tabs = [
   { key: "overview", label: "课堂脉络" },
   { key: "ask", label: "学生问 AI" },
   { key: "reflect", label: "AI 问学生" },
-];
-const aiModes = [
-  { key: "local", label: "本地模式" },
-  { key: "llm", label: "大语言模型模式" },
 ];
 
 const activeTab = ref("overview");
@@ -678,6 +657,14 @@ async function setAiMode(mode) {
   }
 }
 
+function toggleAiMode() {
+  setAiMode(nextAiMode(settings.value.aiMode));
+}
+
+function nextAiMode(mode) {
+  return mode === "llm" ? "local" : "llm";
+}
+
 function cancelActiveTask() {
   activeTask.value?.controller?.abort();
 }
@@ -763,6 +750,10 @@ function modeStatusText(mode) {
 
 function modeHelpText(mode) {
   return mode === "llm" ? "使用真实 AI。每次打开页面会自动测试 API，可用后再进入课堂生成。" : "使用本地假 AI 模板，不请求网络，适合无 API 或网络不稳定时上课。";
+}
+
+function nextModeButtonText(mode) {
+  return mode === "llm" ? "切换到本地模式" : "切换到大语言模型模式";
 }
 
 function normalizeLesson(raw) {

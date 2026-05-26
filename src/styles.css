@@ -81,38 +81,20 @@ button:disabled {
   justify-items: end;
 }
 
-.mode-toggle {
-  display: inline-grid;
-  grid-template-columns: repeat(2, minmax(92px, 1fr));
+.mode-switch-button {
+  min-height: 38px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  overflow: hidden;
-  background: #fff;
-}
-
-.mode-toggle.wide {
-  width: 100%;
-}
-
-.mode-toggle button {
-  min-height: 36px;
-  border: 0;
-  border-right: 1px solid var(--line);
-  padding: 0 12px;
   background: #fff;
   color: var(--green);
-  font-size: 13px;
+  padding: 0 14px;
+  font-size: 14px;
   font-weight: 800;
   white-space: nowrap;
 }
 
-.mode-toggle button:last-child {
-  border-right: 0;
-}
-
-.mode-toggle button.active {
-  background: var(--green);
-  color: #fff;
+.mode-switch-button.wide {
+  width: 100%;
 }
 
 .status-pill {
@@ -776,7 +758,7 @@ select:focus,
 
   .topbar-controls,
   .status-pill,
-  .mode-toggle {
+  .mode-switch-button {
     width: 100%;
     justify-items: stretch;
   }
