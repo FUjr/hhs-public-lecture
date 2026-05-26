@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 LESSON_DIR = ROOT / "lesson_plan"
 OUTPUT_DIR = ROOT / "public" / "generated-lessons"
-GENERATOR_VERSION = "2"
+GENERATOR_VERSION = "3"
 SOURCE_HASH_KEY = "sourceHash"
 GENERATED_BY_KEY = "generatedBy"
 
@@ -101,12 +101,14 @@ def build_fallback_lesson(path: Path, markdown: str) -> dict:
     flower_cards = extract_flower_cards(markdown)
     ai_prompt = extract_ai_prompt(markdown) or "请结合课文内容和自己的经历，说说你对本课核心观点的理解。"
     core = extract_core_statement(markdown, ai_prompt)
+    question_prompt = extract_student_ai_question_prompt(markdown)
+    question_cues = extract_question_cues(markdown, question_prompt)
 
     return {
         "id": slugify(path.stem),
         "title": title,
         "subtitle": "课堂对话 AI",
-        "questionPrompt": "围绕课文内容、写作手法和现实思考提出一个有价值的问题。",
+        "questionPrompt": question_prompt,
         "aiStudentPrompt": ai_prompt,
         "askPanelTitle": "看课文，也看自己",
         "askPanelDescription": "学生自由提问，AI 围绕课文内容、写作手法和现实思考作答。",
@@ -118,11 +120,7 @@ def build_fallback_lesson(path: Path, markdown: str) -> dict:
         "keyPoints": key_points,
         "difficultPoints": difficult_points,
         "stages": extract_stages(markdown),
-        "questionCues": [
-            "可以从“为什么这样安排内容”发问。",
-            "可以从“作者真正想表达什么”发问。",
-            "可以从“课文和现实生活有什么关系”发问。",
-        ],
+        "questionCues": question_cues,
         "flowerCards": flower_cards,
         "thinkingSteps": [
             {"title": "2 分钟", "description": "独立写关键词"},
@@ -153,7 +151,12 @@ def generate_with_ai(markdown: str, fallback: dict) -> dict | None:
         "askPanelTitle, askPanelDescription, questionPlaceholder, questionCues, flowerCards, thinkingSteps, "
         "reflectionHints, presets, summaryTemplate, homeworkTemplate。flowerCards 每项包含 mark, title, description，"
         "必须根据教案动态生成，不要写死固定花名；没有适合意象时返回空数组。presets 每项包含 "
-        "title, category, question, keywords, answer。回答要适合七年级课堂，中文自然简洁。\n\n"
+        "title, category, question, keywords, answer。"
+        "questionPrompt 必须提取教案中“学生问 AI”“学习活动三”或同类环节对学生提出问题的具体要求，"
+        "不能使用泛化的“围绕课文内容、写作手法和现实思考”。"
+        "questionCues 必须根据该环节拆成 3 到 5 条可直接显示给学生的提问提示，"
+        "例如教案要求围绕哪些角度、如何评价 AI 回答、要回到哪些课文依据。"
+        "回答要适合七年级课堂，中文自然简洁。\n\n"
         f"已有默认 JSON：{json.dumps(fallback, ensure_ascii=False)}\n\nMarkdown 教案：\n{markdown}"
     )
 
@@ -233,6 +236,56 @@ def extract_numbered_items(section: str) -> list[str]:
             items.append(match.group(1).strip())
     return items
 
+
+
+def extract_student_ai_question_prompt(markdown: str) -> str:
+    section = extract_activity_section(markdown, ["学习活动三", "学生问 AI 环节", "学生问AI环节", "学生问AI"])
+    if section:
+        for line in section.splitlines():
+            cleaned = clean_markdown(line)
+            if "向AI" in cleaned and ("提问" in cleaned or "问题" in cleaned):
+                return cleaned
+        first = first_non_empty_line(section)
+        if first:
+            return first
+    return "请根据教案要求，围绕本课关键内容设计一个有价值的问题，向 AI 发出提问。"
+
+
+def extract_question_cues(markdown: str, question_prompt: str) -> list[str]:
+    cues: list[str] = []
+    for quoted in re.findall(r'[“"]([^”"]{2,30})[”"]', question_prompt):
+        if quoted not in cues:
+            cues.append(f"可以围绕“{quoted}”设计问题。")
+
+    section = extract_activity_section(markdown, ["学习活动三", "学生问 AI 环节", "学生问AI环节", "学生问AI"])
+    if section:
+        for line in section.splitlines():
+            cleaned = clean_markdown(line)
+            if not cleaned:
+                continue
+            if re.match(r"^\d+[、.]", cleaned):
+                cleaned = re.sub(r"^\d+[、.]\s*", "", cleaned)
+                if "问题" in cleaned or "AI" in cleaned or "回答" in cleaned or "依据" in cleaned:
+                    cues.append(cleaned)
+
+    defaults = [
+        "先让小组讨论并确定一个真正想追问的问题。",
+        "提问后要观察 AI 回答是否准确、完整。",
+        "评价 AI 回答时要回到课文依据。",
+    ]
+    for item in defaults:
+        if item not in cues:
+            cues.append(item)
+    return cues[:5]
+
+
+def extract_activity_section(markdown: str, headings: list[str]) -> str:
+    for heading in headings:
+        pattern = rf"^#+\s+(?:（[一二三四五六七八九十]+）)?\s*{re.escape(heading)}\s*$([\s\S]*?)(?=^#+\s+|\Z)"
+        match = re.search(pattern, markdown, flags=re.MULTILINE)
+        if match:
+            return match.group(1).strip()
+    return ""
 
 def extract_presets(markdown: str) -> list[dict]:
     section = extract_raw_heading(markdown, "预设问题") or extract_bold_block(markdown, "预设问题")
