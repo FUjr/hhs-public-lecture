@@ -1,6 +1,9 @@
 __pycache__/
+scripts/__pycache__/
 logs/
 session_logs/
+node_modules/
+dist/
 _book_extract/
 _pdf_word_extract/
 _sample_pdf/

@@ -135,9 +135,9 @@ class RemoteLessonAI(AIProvider):
         model: str | None = None,
         timeout_seconds: int = 12,
     ) -> None:
-        raw_endpoint = endpoint or os.getenv("LESSON_AI_ENDPOINT")
-        self.api_key = api_key or os.getenv("LESSON_AI_API_KEY")
-        self.model = model or os.getenv("LESSON_AI_MODEL", "gpt-4.1-mini")
+        raw_endpoint = endpoint or os.getenv("V2_LESSON_AI_ENDPOINT") or os.getenv("LESSON_AI_ENDPOINT")
+        self.api_key = api_key or os.getenv("V2_LESSON_AI_API_KEY") or os.getenv("LESSON_AI_API_KEY")
+        self.model = model or os.getenv("V2_LESSON_AI_MODEL") or os.getenv("LESSON_AI_MODEL", "gpt-4.1-mini")
         self.timeout_seconds = timeout_seconds
         self.fallback = MockLessonAI(reflection_prompt)
         self.recent_answers: deque[str] = deque(maxlen=4)

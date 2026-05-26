@@ -14,6 +14,6 @@ if (-not $status) {
     exit 0
 }
 
-git add .env.example .gitignore README.md ai_provider.py lesson_config.py main.py session_record.py web_dialogue_app.py scripts/auto_push.ps1
+git add .
 git commit -m $Message
 git push
